@@ -1,0 +1,21 @@
+# Portainer stack. Image is built on the Docker host:
+#   rsync repo to ~/library-helper, then: docker build -t library-helper:latest ~/library-helper
+# Set the ${...} values under the stack's "Environment variables".
+services:
+  library-helper:
+    image: library-helper:latest
+    container_name: library-helper
+    restart: unless-stopped
+    environment:
+      MCP_TRANSPORT: http
+      PORT: "3000"
+      LIBRARY_CARD_NUMBER: ${LIBRARY_CARD_NUMBER}
+      LIBRARY_PIN: ${LIBRARY_PIN}
+      CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN}
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS}
+    networks: [nginx-proxy] # shared with cloudflared-tunnel-1
+
+networks:
+  nginx-proxy:
+    external: true

@@ -1,0 +1,12 @@
+# Run on the home server next to cloudflared. Point the tunnel's public hostname at
+# http://library-helper:3000 (same Docker network) — no ports need publishing.
+services:
+  library-helper:
+    build: .
+    restart: unless-stopped
+    env_file: .env # LIBRARY_CARD_NUMBER, LIBRARY_PIN, CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, ALLOWED_EMAILS
+    networks: [tunnel]
+
+networks:
+  tunnel:
+    external: true # the network your cloudflared container is on; rename to match

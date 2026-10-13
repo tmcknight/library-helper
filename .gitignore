@@ -1,0 +1,22 @@
+# Dependencies & build output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Tooling
+.playwright-mcp/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
