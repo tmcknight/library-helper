@@ -64,3 +64,6 @@ export const LOAN_RULES =
 
 export const HOLD_RULES =
   "Library rules: at most 40 holds on physical items per card at once; a ready hold is kept for pickup for 7 days.";
+
+// Opening hours aren't in Iguana; the library's main website publishes them as one table.
+export const HOURS_URL = "https://www.lclibrary.ca/en/borrow/lambton-county-library-hours.aspx";
