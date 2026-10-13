@@ -38,6 +38,46 @@ claude mcp add library-helper \
 
 Omit the env vars for catalogue-only use.
 
+To poke at the tools without Claude, use the MCP Inspector:
+
+```sh
+npx @modelcontextprotocol/inspector node src/index.ts
+```
+
+## Usage
+
+Ask in plain language; Claude picks the tools.
+
+- "Does the library have *Project Hail Mary*? Which branches have a copy in right now?"
+- "Find the newest books by Louise Penny."
+- "Put a hold on the large print edition for pickup at Petrolia."
+- "What do I have checked out, and when is it due? Renew anything due this week."
+- "Do I have any holds ready for pickup?"
+- "Do I owe any fines?"
+
+### A typical flow
+
+1. **Search.** `search_catalogue` with `{"query": "project hail mary", "index": "title"}`. A popular title usually comes back as a `cluster` with one entry per format (trimmed):
+
+   ```json
+   {
+     "recordId": "1.56450",
+     "kind": "cluster",
+     "title": "Project Hail Mary",
+     "versions": [
+       { "label": "eBook",       "records": [{ "recordId": "1.785848", "reservable": false }] },
+       { "label": "Fiction",     "records": [{ "recordId": "1.693721", "reservable": true }] },
+       { "label": "Large print", "records": [{ "recordId": "1.710522", "reservable": true }] }
+     ]
+   }
+   ```
+
+2. **Pick a format.** Use a record id from `versions`, never the cluster id. eBooks have no physical copies.
+3. **Check copies.** `get_availability` with `{"recordId": "1.710522"}` lists every copy with branch, shelfmark, status and due date.
+4. **Place a hold.** `place_hold` with `{"recordId": "1.710522", "pickupLocation": "LCL/PETR"}`. `list_branches` gives the valid pickup codes.
+
+Other searches: set `index` to `author`, `subject`, `series` or `isbn`, `sort` to `newest`, and page with `start` / `limit`.
+
 ## How the site works
 
 - **Session**: `GET www.main.cls` sets the `CSPSESSIONID-*` cookie and embeds `sessionID` (the `SIDTKN`). `GET www.jsSettings.cls` then exposes the REST token in `Vfocus.Settings.uaUrl` (`Rest.Server.cls?sessionId=…&method=user/`). Idle timeout is 900 s.
