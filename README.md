@@ -2,6 +2,9 @@
 
 MCP server for the [Lambton County Library](https://catalogue.lclibrary.ca/iguana/www.main.cls) catalogue and patron account. The site runs Infor Iguana 6.5; this server talks to the same backend endpoints the web UI uses.
 
+> [!NOTE]
+> Unofficial. Not affiliated with or endorsed by Lambton County Library or Infor. The endpoints are undocumented and may change without notice. Use your own card, keep request volume reasonable, and follow the library's terms of use.
+
 ## Tools
 
 | Tool | Needs card | What it does |
