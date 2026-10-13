@@ -2,7 +2,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { IguanaError, SEARCH_INDEXES } from "./iguana.ts";
 import type { IguanaClient } from "./iguana.ts";
-import { BRANCHES, HOLD_RULES, LOAN_RULES, PICKUP_LOCATIONS, RESERVE_CONFIG } from "./lambton.ts";
+import { fetchBranchHours, libraryToday } from "./hours.ts";
+import { BRANCHES, HOLD_RULES, HOURS_URL, LOAN_RULES, PICKUP_LOCATIONS, RESERVE_CONFIG } from "./lambton.ts";
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -73,6 +74,36 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
       annotations: { readOnlyHint: true },
     },
     () => run(async () => ({ branches: BRANCHES, pickupLocations: PICKUP_LOCATIONS })),
+  );
+
+  server.registerTool(
+    "branch_hours",
+    {
+      title: "Branch hours",
+      description:
+        "Regular weekly opening hours for each branch, from the library website. hours maps each weekday to an " +
+        'opening range like "10AM - 3PM", or null when closed that day. A note such as "Temporarily closed" ' +
+        "overrides the listed hours. today is the current date, weekday and time in the library's timezone. " +
+        "Statutory-holiday closures aren't listed; point the user to the branch url to confirm.",
+      inputSchema: {
+        branch: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Branch name or location code, e.g. "Petrolia" or "LCL/PETR". Omit for all branches.'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    ({ branch }) =>
+      run(async () => {
+        let branches = await fetchBranchHours();
+        if (branch) {
+          const q = branch.trim().toLowerCase();
+          branches = branches.filter((b) => b.code?.toLowerCase() === q || b.name.toLowerCase().includes(q));
+          if (!branches.length) throw new Error(`no branch matching "${branch}"; omit branch to list all`);
+        }
+        return { today: libraryToday(), source: HOURS_URL, branches };
+      }),
   );
 
   // ---- Patron account (needs LIBRARY_CARD_NUMBER / LIBRARY_PIN) -------------------

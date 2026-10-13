@@ -13,6 +13,7 @@ MCP server for the [Lambton County Library](https://catalogue.lclibrary.ca/iguan
 | `get_record` | | Full bibliographic record + per-branch summary |
 | `get_availability` | | Every copy: branch, shelfmark, status, due date, hold count |
 | `list_branches` | | Branch and pickup location codes |
+| `branch_hours` | | Weekly opening hours per branch, plus temporary closures |
 | `account_summary` | ✓ | Loan/hold/overdue counts |
 | `list_loans` / `renew_loans` | ✓ | Checked-out items; renew by barcode |
 | `list_holds` / `place_hold` / `cancel_holds` | ✓ | Reservations |
@@ -54,6 +55,7 @@ Ask in plain language; Claude picks the tools.
 - "What do I have checked out, and when is it due? Renew anything due this week."
 - "Do I have any holds ready for pickup?"
 - "Do I owe any fines?"
+- "Is the Forest branch open right now?"
 
 ### A typical flow
 
@@ -84,6 +86,7 @@ Other searches: set `index` to `author`, `subject`, `series` or `isbn`, `sort` t
 - **Every request needs a same-origin `Referer`**. Without it the server returns `200` with an empty body.
 - **Catalogue**: `POST Proxy.SearchRequest.cls` (form-encoded, `fu=BibSearch`) returns SRU-style XML. `RequestType=ResultSet_DisplayList` searches, `RecordNumber` + `TemplateId=Iguana_Full` gets a record, `RecordNumber` + `DetailedHoldings=…` gets copies.
 - **Account**: `POST Rest.Server.cls?sessionId=<token>&method=user/<action>` with JSON body `{"request": {...}}`. `user/credentials` (card + PIN) returns a patron `sessionId` that every other call passes inside `request`. Actions: `summary`, `loans`, `renewal`, `reservations`, `reserve` (multi-step: `record` → `reserve`), `cancelreservation`, `suspendreservation`, `changereservation`, `paymentsdue`, `loanhistory`, `readinglists`, …
+- **Hours** aren't in Iguana. `branch_hours` reads the table on the library website's [hours page](https://www.lclibrary.ca/en/borrow/lambton-county-library-hours.aspx) (cached for an hour).
 - Lambton-specific settings (branch codes, hold config) are in `src/lambton.ts`. Pointing `LIBRARY_BASE_URL` at another Iguana site needs those changed.
 
 ## Remote deployment (claude.ai via Cloudflare Access)
