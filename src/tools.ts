@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { IguanaError, SEARCH_INDEXES } from "./iguana.ts";
 import type { IguanaClient } from "./iguana.ts";
-import { BRANCHES, PICKUP_LOCATIONS, RESERVE_CONFIG } from "./lambton.ts";
+import { BRANCHES, HOLD_RULES, LOAN_RULES, PICKUP_LOCATIONS, RESERVE_CONFIG } from "./lambton.ts";
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -92,7 +92,11 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     "list_loans",
     {
       title: "List current loans",
-      description: "Items currently checked out on the library card, with due dates and renewal info.",
+      description:
+        "Items currently checked out on the library card, with due dates (YYYYMMDD) and renewal info: " +
+        "renewalCounter is how many times the item has been renewed, isReserved=1 means another patron has it on hold, " +
+        "and renewalException gives the reason it can't be renewed right now, if any. " +
+        LOAN_RULES,
       inputSchema: { limit: z.number().int().min(1).max(200).default(100) },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -103,7 +107,9 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     "renew_loans",
     {
       title: "Renew loans",
-      description: "Renew checked-out items by barcode (from list_loans). Returns per-item success or refusal reason.",
+      description:
+        "Renew checked-out items by barcode (from list_loans). Returns per-item success or refusal reason. " +
+        LOAN_RULES,
       inputSchema: { barcodes: z.array(z.string().min(1)).min(1) },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
@@ -114,7 +120,8 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     "list_holds",
     {
       title: "List holds",
-      description: "Holds (reservations) on the library card: queue position, pickup branch, ready-for-pickup status.",
+      description:
+        "Holds (reservations) on the library card: queue position, pickup branch, ready-for-pickup status. " + HOLD_RULES,
       inputSchema: { limit: z.number().int().min(1).max(200).default(100) },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -127,7 +134,8 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
       title: "Place hold",
       description:
         "Place a hold on a catalogue record (not a cluster id) for pickup at a branch. " +
-        "Use list_branches for valid pickupLocation codes.",
+        "Use list_branches for valid pickupLocation codes. " +
+        HOLD_RULES,
       inputSchema: {
         recordId,
         pickupLocation: z.enum(PICKUP_LOCATIONS.map((p) => p.code) as [string, ...string[]]),

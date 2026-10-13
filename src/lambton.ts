@@ -54,3 +54,13 @@ export const RESERVE_CONFIG: ReserveConfig = {
   pickupLocations: PICKUP_CODES,
   fields: "HdrPickupLocation",
 };
+
+// Borrowing rules from the Circulation Policy (R02.02, rev. Aug 2023). The server enforces
+// these; they're here so the model can explain a refusal or plan ahead instead of guessing.
+export const LOAN_RULES =
+  "Library rules: items can be renewed up to a maximum of three loan periods; an item another patron " +
+  "has on hold (isReserved=1) cannot be renewed; items 30 days overdue are treated as lost and a " +
+  "replacement fee is invoiced.";
+
+export const HOLD_RULES =
+  "Library rules: at most 40 holds on physical items per card at once; a ready hold is kept for pickup for 7 days.";
