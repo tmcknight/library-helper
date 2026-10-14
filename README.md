@@ -49,7 +49,7 @@ claude mcp add library-helper -- docker run -i --rm \
   ghcr.io/tmcknight/library-helper
 ```
 
-The image defaults to HTTP mode (see [Remote deployment](#remote-deployment-claudeai-via-cloudflare-access)), which refuses to start without Cloudflare Access settings. For a quick local look, `-e ALLOW_UNAUTHENTICATED=1 -p 3000:3000` turns the check off. Never expose that port: anyone who reaches it can use your card.
+The image defaults to HTTP mode, which refuses to start until an auth mode is configured (see [Remote deployment](#remote-deployment)). For a quick local look, `-e AUTH_MODE=none -p 3000:3000` turns the check off. Never expose that port: anyone who reaches it can use your card.
 
 To poke at the tools without Claude, use the MCP Inspector:
 
@@ -103,28 +103,89 @@ Other searches: set `index` to `author`, `subject`, `series` or `isbn`, `sort` t
 
 ## Remote deployment
 
-`MCP_TRANSPORT=http` serves stateless Streamable HTTP on `:$PORT/mcp` (`/healthz` for health checks). Every `/mcp` request goes through one auth check, picked with `AUTH_MODE`. Without it the mode is inferred from whichever settings are present, and the server refuses to start if there are none.
+`MCP_TRANSPORT=http` serves stateless Streamable HTTP on `:$PORT/mcp`, with `/healthz` for health checks. Every `/mcp` request has to pass an auth check, because whoever reaches it can use your library card. Pick how with `AUTH_MODE`:
 
-| `AUTH_MODE` | Settings | Checks |
+| `AUTH_MODE` | Use when | Works with claude.ai |
 |---|---|---|
-| `cloudflare-access` | `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` | The `Cf-Access-Jwt-Assertion` JWT that [Cloudflare Access](#claudeai-via-cloudflare-access) adds |
-| `jwt` | `AUTH_JWKS_URL`, `AUTH_AUDIENCE`, optional `AUTH_ISSUER`, `AUTH_JWT_HEADER` (default `Authorization`) | A JWT from any identity-aware proxy (Pomerium, oauth2-proxy, Authentik, Google IAP, …), verified against its JWKS |
-| `bearer` | `AUTH_TOKEN` | `Authorization: Bearer <AUTH_TOKEN>` |
-| `none` | | Nothing. Local testing only (`ALLOW_UNAUTHENTICATED=1` also works) |
+| [`cloudflare-access`](#cloudflare-access) | The server sits behind a Cloudflare Tunnel | Yes |
+| [`jwt`](#jwt) | It sits behind another login proxy that forwards a signed JWT (Pomerium, Google IAP, …) | Yes, if the proxy handles OAuth for MCP clients |
+| [`bearer`](#bearer) | Only Claude Code or similar clients connect, e.g. over Tailscale or your LAN | No |
+| [`none`](#none) | Trying it out on your own machine | No |
 
-`ALLOWED_EMAILS` (comma-separated) further restricts both JWT modes to tokens with a matching `email` claim.
+Setup is the same for all of them:
 
-claude.ai connectors sign in with OAuth and can't send a fixed token, so `bearer` is for Claude Code and similar clients (`claude mcp add --transport http library-helper https://host/mcp --header "Authorization: Bearer <token>"`). For claude.ai, put a proxy that handles the OAuth sign-in in front and use one of the JWT modes.
+1. `cp .env.example .env`
+2. Set `AUTH_MODE` and fill in that mode's section (below). Leave the other sections blank.
+3. `docker compose up -d` (pulls the published image; add `--build` to build from source)
+4. `docker compose logs` should show `library-helper MCP listening on :3000/mcp (auth: <mode>)`. A missing setting stops the server at startup and names the variable. A rejected request logs why, e.g. `rejected request: missing cf-access-jwt-assertion header`; the client only gets `403`.
 
-### claude.ai via Cloudflare Access
+`claude.ai` connectors sign in with OAuth and can't send a fixed token, so for claude.ai you need a proxy in front that does the OAuth sign-in, then `cloudflare-access` or `jwt` behind it.
 
-The origin only accepts requests carrying a valid Access JWT for `CF_ACCESS_AUD`, so it's useless if reached around the tunnel.
+If `AUTH_MODE` is unset it's inferred from the settings present, in this order: `CF_ACCESS_*`, `AUTH_JWKS_URL`, `AUTH_TOKEN`, `ALLOW_UNAUTHENTICATED=1`. With none of them the server refuses to start.
 
-1. On the server: `cp .env.example .env`, fill it in, `docker compose up -d` (pulls the published image; `--build` builds from source). Attach it to cloudflared's Docker network.
+### cloudflare-access
+
+Cloudflare Access signs every request it lets through with a JWT in `Cf-Access-Jwt-Assertion`. The server checks it, so it's useless if reached around the tunnel.
+
+1. Run the container on the same Docker network as `cloudflared` (edit `networks` in `compose.yaml`). No ports need publishing.
 2. Tunnel: add a public hostname, e.g. `library.example.com` → `http://library-helper:3000`.
-3. Zero Trust → Access → Applications → add **Self-hosted** app for that hostname, policy = Allow your email. Copy its **AUD tag** into `.env`.
-4. Same app → **Advanced settings** → enable **Managed OAuth** (Access becomes the OAuth server, with dynamic client registration). Under allowed redirect URIs add `https://claude.ai/*`.
-5. claude.ai → Settings → Connectors → **Add custom connector** → `https://library.example.com/mcp`. Leave client ID/secret blank; Claude registers itself, then you sign in through Access.
+3. Zero Trust → Access → Applications → add a **Self-hosted** app for that hostname, with a policy that allows your email.
+4. In `.env`, set `CF_ACCESS_TEAM_DOMAIN` (Zero Trust → Settings → Custom pages, e.g. `https://yourteam.cloudflareaccess.com`) and `CF_ACCESS_AUD` (the app's **AUD tag**, on its Overview tab). Optionally set `ALLOWED_EMAILS` too.
+5. Same app → **Advanced settings** → enable **Managed OAuth**, so Access becomes the OAuth server with dynamic client registration. Under allowed redirect URIs add `https://claude.ai/*`.
+6. claude.ai → Settings → Connectors → **Add custom connector** → `https://library.example.com/mcp`. Leave client ID/secret blank; Claude registers itself, then you sign in through Access.
+
+### jwt
+
+For any other proxy that logs people in and forwards a signed JWT to the app. The server fetches the proxy's public keys from `AUTH_JWKS_URL` and checks each token's signature, expiry, audience and (if set) issuer.
+
+| Setting | What to put |
+|---|---|
+| `AUTH_JWKS_URL` | The proxy's JWKS endpoint |
+| `AUTH_AUDIENCE` | The token's expected `aud` claim. Required: without it any token from the proxy would pass |
+| `AUTH_ISSUER` | The token's expected `iss` claim. Optional but recommended |
+| `AUTH_JWT_HEADER` | The header carrying the token. Default `Authorization` (a `Bearer ` prefix is stripped) |
+| `ALLOWED_EMAILS` | Optional: only tokens whose `email` claim is in this comma-separated list |
+
+Pomerium (route `library.example.com`):
+
+```sh
+AUTH_MODE=jwt
+AUTH_JWKS_URL=https://library.example.com/.well-known/pomerium/jwks.json
+AUTH_AUDIENCE=library.example.com
+AUTH_ISSUER=library.example.com
+AUTH_JWT_HEADER=X-Pomerium-Jwt-Assertion
+```
+
+Google Cloud IAP:
+
+```sh
+AUTH_MODE=jwt
+AUTH_JWKS_URL=https://www.gstatic.com/iap/verify/public_key-jwk
+AUTH_AUDIENCE=/projects/<project-number>/global/backendServices/<service-id>
+AUTH_ISSUER=https://cloud.google.com/iap
+AUTH_JWT_HEADER=X-Goog-IAP-JWT-Assertion
+```
+
+For other proxies (Authentik, oauth2-proxy, …), look up which header carries the JWT and where its JWKS is served. To find the right `aud` and `iss`, decode a token the proxy forwards: its middle part is base64url-encoded JSON.
+
+### bearer
+
+A shared secret in `Authorization: Bearer <token>`, for clients that let you set headers. Best kept off the public internet, e.g. reachable only over Tailscale or your LAN.
+
+1. Generate a token: `openssl rand -hex 32`, and set it as `AUTH_TOKEN` in `.env`.
+2. Publish the port: add `ports: ["3000:3000"]` to `compose.yaml`.
+3. Add it to Claude Code:
+
+   ```sh
+   claude mcp add --transport http library-helper http://<host>:3000/mcp \
+     --header "Authorization: Bearer <token>"
+   ```
+
+Over plain HTTP the token travels unencrypted. Use HTTPS in front if the network isn't one you trust.
+
+### none
+
+No check at all: `AUTH_MODE=none` (or `ALLOW_UNAUTHENTICATED=1`). Only for local testing, e.g. with the MCP Inspector against `http://localhost:3000/mcp`. Never expose the port: anyone who reaches it can renew, place and cancel holds on your card.
 
 ## Releasing
 
