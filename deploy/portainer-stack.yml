@@ -8,6 +8,7 @@ services:
     environment:
       MCP_TRANSPORT: http
       PORT: "3000"
+      AUTH_MODE: cloudflare-access
       LIBRARY_CARD_NUMBER: ${LIBRARY_CARD_NUMBER}
       LIBRARY_PIN: ${LIBRARY_PIN}
       CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN}
