@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
-import type { IncomingMessage } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { authFromEnv } from "./auth.ts";
 import { IguanaClient } from "./iguana.ts";
 import { registerTools } from "./tools.ts";
 
@@ -32,7 +31,7 @@ if ((env.MCP_TRANSPORT ?? "stdio") === "stdio") {
 
 async function serveHttp(): Promise<void> {
   const port = Number(env.PORT ?? 3000);
-  const verifyAccess = accessVerifier();
+  const auth = authFromEnv(env);
 
   const http = createServer(async (req, res) => {
     const path = new URL(req.url ?? "/", "http://x").pathname;
@@ -45,7 +44,7 @@ async function serveHttp(): Promise<void> {
       return;
     }
     try {
-      await verifyAccess(req);
+      await auth.verify(req);
     } catch (e) {
       console.error("rejected request:", e instanceof Error ? e.message : e);
       res.writeHead(403, { "Content-Type": "text/plain" }).end("forbidden");
@@ -67,30 +66,5 @@ async function serveHttp(): Promise<void> {
     }
   });
 
-  http.listen(port, () => console.error(`library-helper MCP listening on :${port}/mcp`));
-}
-
-// Cloudflare Access puts a signed JWT in Cf-Access-Jwt-Assertion on every request it lets
-// through. Checking it means the origin can't be reached by going around the tunnel.
-function accessVerifier(): (req: IncomingMessage) => Promise<void> {
-  const team = env.CF_ACCESS_TEAM_DOMAIN; // e.g. https://yourteam.cloudflareaccess.com
-  const aud = env.CF_ACCESS_AUD; // the Access application's Audience (AUD) tag
-  if (!team || !aud) {
-    if (env.ALLOW_UNAUTHENTICATED !== "1") {
-      throw new Error("Set CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD (or ALLOW_UNAUTHENTICATED=1 for local testing).");
-    }
-    console.error("WARNING: Cloudflare Access JWT check disabled");
-    return async () => {};
-  }
-  const issuer = team.replace(/\/$/, "");
-  const jwks = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`));
-  const allowed = env.ALLOWED_EMAILS?.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-  return async (req) => {
-    const token = req.headers["cf-access-jwt-assertion"];
-    if (typeof token !== "string") throw new Error("missing Cf-Access-Jwt-Assertion");
-    const { payload } = await jwtVerify(token, jwks, { issuer, audience: aud });
-    if (allowed?.length && !allowed.includes(String(payload.email ?? "").toLowerCase())) {
-      throw new Error(`email ${payload.email} not in ALLOWED_EMAILS`);
-    }
-  };
+  http.listen(port, () => console.error(`library-helper MCP listening on :${port}/mcp (auth: ${auth.mode})`));
 }

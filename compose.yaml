@@ -6,7 +6,7 @@ services:
     image: ghcr.io/tmcknight/library-helper:latest
     build: .
     restart: unless-stopped
-    env_file: .env # LIBRARY_CARD_NUMBER, LIBRARY_PIN, CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, ALLOWED_EMAILS
+    env_file: .env # card, PIN and AUTH_MODE settings; see .env.example
     networks: [tunnel]
 
 networks:
