@@ -101,9 +101,24 @@ Other searches: set `index` to `author`, `subject`, `series` or `isbn`, `sort` t
 - **Hours** aren't in Iguana. `branch_hours` reads the table on the library website's [hours page](https://www.lclibrary.ca/en/borrow/lambton-county-library-hours.aspx) (cached for an hour).
 - Lambton-specific settings (branch codes, hold config) are in `src/lambton.ts`. Pointing `LIBRARY_BASE_URL` at another Iguana site needs those changed.
 
-## Remote deployment (claude.ai via Cloudflare Access)
+## Remote deployment
 
-`MCP_TRANSPORT=http` serves stateless Streamable HTTP on `:$PORT/mcp` (`/healthz` for health checks). Every `/mcp` request must carry a valid `Cf-Access-Jwt-Assertion` for `CF_ACCESS_AUD`, so the origin is useless if reached around the tunnel. `ALLOWED_EMAILS` optionally narrows it further.
+`MCP_TRANSPORT=http` serves stateless Streamable HTTP on `:$PORT/mcp` (`/healthz` for health checks). Every `/mcp` request goes through one auth check, picked with `AUTH_MODE`. Without it the mode is inferred from whichever settings are present, and the server refuses to start if there are none.
+
+| `AUTH_MODE` | Settings | Checks |
+|---|---|---|
+| `cloudflare-access` | `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` | The `Cf-Access-Jwt-Assertion` JWT that [Cloudflare Access](#claudeai-via-cloudflare-access) adds |
+| `jwt` | `AUTH_JWKS_URL`, `AUTH_AUDIENCE`, optional `AUTH_ISSUER`, `AUTH_JWT_HEADER` (default `Authorization`) | A JWT from any identity-aware proxy (Pomerium, oauth2-proxy, Authentik, Google IAP, …), verified against its JWKS |
+| `bearer` | `AUTH_TOKEN` | `Authorization: Bearer <AUTH_TOKEN>` |
+| `none` | | Nothing. Local testing only (`ALLOW_UNAUTHENTICATED=1` also works) |
+
+`ALLOWED_EMAILS` (comma-separated) further restricts both JWT modes to tokens with a matching `email` claim.
+
+claude.ai connectors sign in with OAuth and can't send a fixed token, so `bearer` is for Claude Code and similar clients (`claude mcp add --transport http library-helper https://host/mcp --header "Authorization: Bearer <token>"`). For claude.ai, put a proxy that handles the OAuth sign-in in front and use one of the JWT modes.
+
+### claude.ai via Cloudflare Access
+
+The origin only accepts requests carrying a valid Access JWT for `CF_ACCESS_AUD`, so it's useless if reached around the tunnel.
 
 1. On the server: `cp .env.example .env`, fill it in, `docker compose up -d` (pulls the published image; `--build` builds from source). Attach it to cloudflared's Docker network.
 2. Tunnel: add a public hostname, e.g. `library.example.com` → `http://library-helper:3000`.
