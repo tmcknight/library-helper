@@ -1,9 +1,8 @@
-# Portainer stack. Image is built on the Docker host:
-#   rsync repo to ~/library-helper, then: docker build -t library-helper:latest ~/library-helper
+# Portainer stack. Pulls the image published from v* tags; redeploy with "Re-pull image" on.
 # Set the ${...} values under the stack's "Environment variables".
 services:
   library-helper:
-    image: library-helper:latest
+    image: ghcr.io/tmcknight/library-helper:latest
     container_name: library-helper
     restart: unless-stopped
     environment:

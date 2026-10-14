@@ -39,6 +39,18 @@ claude mcp add library-helper \
 
 Omit the env vars for catalogue-only use.
 
+### Docker
+
+Images for `linux/amd64` and `linux/arm64` are published to `ghcr.io/tmcknight/library-helper` from each `v*` tag (`latest`, `X.Y.Z`, `X.Y`); `edge` tracks `main`. No local Node needed:
+
+```sh
+claude mcp add library-helper -- docker run -i --rm \
+  -e MCP_TRANSPORT=stdio -e LIBRARY_CARD_NUMBER=<card> -e LIBRARY_PIN=<pin> \
+  ghcr.io/tmcknight/library-helper
+```
+
+The image defaults to HTTP mode (see [Remote deployment](#remote-deployment-claudeai-via-cloudflare-access)), which refuses to start without Cloudflare Access settings. For a quick local look, `-e ALLOW_UNAUTHENTICATED=1 -p 3000:3000` turns the check off. Never expose that port: anyone who reaches it can use your card.
+
 To poke at the tools without Claude, use the MCP Inspector:
 
 ```sh
@@ -93,8 +105,18 @@ Other searches: set `index` to `author`, `subject`, `series` or `isbn`, `sort` t
 
 `MCP_TRANSPORT=http` serves stateless Streamable HTTP on `:$PORT/mcp` (`/healthz` for health checks). Every `/mcp` request must carry a valid `Cf-Access-Jwt-Assertion` for `CF_ACCESS_AUD`, so the origin is useless if reached around the tunnel. `ALLOWED_EMAILS` optionally narrows it further.
 
-1. On the server: `cp .env.example .env`, fill it in, `docker compose up -d --build` (attach it to cloudflared's Docker network).
+1. On the server: `cp .env.example .env`, fill it in, `docker compose up -d` (pulls the published image; `--build` builds from source). Attach it to cloudflared's Docker network.
 2. Tunnel: add a public hostname, e.g. `library.example.com` → `http://library-helper:3000`.
 3. Zero Trust → Access → Applications → add **Self-hosted** app for that hostname, policy = Allow your email. Copy its **AUD tag** into `.env`.
 4. Same app → **Advanced settings** → enable **Managed OAuth** (Access becomes the OAuth server, with dynamic client registration). Under allowed redirect URIs add `https://claude.ai/*`.
 5. claude.ai → Settings → Connectors → **Add custom connector** → `https://library.example.com/mcp`. Leave client ID/secret blank; Claude registers itself, then you sign in through Access.
+
+## Releasing
+
+Bump `version` in `package.json`, merge, then tag `main`:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The `docker` workflow builds both architectures and pushes the image to GHCR. On mcbuntu, redeploy the Portainer stack with "Re-pull image" on.
