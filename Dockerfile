@@ -1,4 +1,7 @@
 FROM node:24-alpine
+LABEL org.opencontainers.image.source=https://github.com/tmcknight/library-helper \
+      org.opencontainers.image.description="MCP server for the Lambton County Library catalogue and patron account" \
+      org.opencontainers.image.licenses=MIT
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
