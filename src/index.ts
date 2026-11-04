@@ -16,7 +16,7 @@ const client = new VegaClient({
 });
 
 function newServer(): McpServer {
-  const server = new McpServer({ name: "library-helper", version: "0.1.0" });
+  const server = new McpServer({ name: "library-helper", version: "0.2.0" });
   registerTools(server, client);
   return server;
 }
