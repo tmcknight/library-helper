@@ -4,21 +4,19 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { authFromEnv } from "./auth.ts";
-import { IguanaClient } from "./iguana.ts";
+import { VegaClient } from "./vega.ts";
 import { registerTools } from "./tools.ts";
 
 const env = process.env;
 
 // One library session shared by every MCP request: it's a single card either way.
-const client = new IguanaClient({
-  baseUrl: env.LIBRARY_BASE_URL ?? "https://catalogue.lclibrary.ca/iguana/",
-  profile: env.LIBRARY_PROFILE ?? "Iguana",
+const client = new VegaClient({
   cardNumber: env.LIBRARY_CARD_NUMBER,
   pin: env.LIBRARY_PIN,
 });
 
 function newServer(): McpServer {
-  const server = new McpServer({ name: "library-helper", version: "0.1.0" });
+  const server = new McpServer({ name: "library-helper", version: "0.2.0" });
   registerTools(server, client);
   return server;
 }

@@ -1,18 +1,28 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parseHoursTable, libraryToday } from "../src/hours.ts";
+import { parseHoursPage, libraryToday } from "../src/hours.ts";
 
+// Four branch sections from lclibrary.ca/visit/locations-and-hours/ (2026-11): a normal
+// one, a closed one, one with a wrong link, and Sarnia's differently-built heading.
 const html = readFileSync(new URL("fixtures/hours.html", import.meta.url), "utf8");
 
-test("hours: one row per branch, mapped to catalogue codes", () => {
-  const branches = parseHoursTable(html);
-  assert.equal(branches.length, 24);
+test("hours: one entry per branch section, mapped to catalogue codes", () => {
+  const branches = parseHoursPage(html);
+  assert.deepEqual(
+    branches.map((b) => [b.name, b.code]),
+    [
+      ["Alvinston Library", "3"],
+      ["Bright's Grove Library", "6"],
+      ["Inwood Library", "14"],
+      ["Sarnia Library", "23"],
+    ],
+  );
 
   const alvinston = branches[0];
-  assert.equal(alvinston.name, "Alvinston");
-  assert.equal(alvinston.code, "LCL/ALVI");
-  assert.equal(alvinston.url, "https://www.lclibrary.ca/en/visit/alvinston-library.aspx");
+  assert.equal(alvinston.url, "https://www.lclibrary.ca/visit/locations-and-hours/alvinston-library/");
+  assert.equal(alvinston.address, "3251 River St, Alvinston, Ontario, N0N 1A0");
+  assert.equal(alvinston.phone, "519-898-2921");
   assert.equal(alvinston.note, undefined);
   assert.deepEqual(alvinston.hours, {
     monday: "10AM - 3PM",
@@ -24,26 +34,25 @@ test("hours: one row per branch, mapped to catalogue codes", () => {
     sunday: null,
   });
 
-  const grandBend = branches.find((b) => b.name === "Grand Bend")!;
-  assert.equal(grandBend.code, "LCL/GRBE");
-
-  const sarnia = branches.find((b) => b.code === "LCL/SARN")!;
+  const sarnia = branches[3];
   assert.equal(sarnia.hours.sunday, "2PM - 5PM");
+  assert.equal(sarnia.url, undefined);
 });
 
-test("hours: closure notes, and branches without a catalogue code", () => {
-  const branches = parseHoursTable(html);
-  const brightsGrove = branches.find((b) => b.name === "Bright's Grove")!;
-  assert.equal(brightsGrove.code, undefined);
+test("hours: closure notes and mislinked branches", () => {
+  const branches = parseHoursPage(html);
+  const brightsGrove = branches.find((b) => b.code === "6")!;
   assert.equal(brightsGrove.note, "Temporarily closed");
+  assert.ok(Object.values(brightsGrove.hours).every((h) => h === null));
 
-  const mooretown = branches.find((b) => b.code === "LCL/MOOR")!;
-  assert.equal(mooretown.note, "Temporarily closed");
-  assert.equal(mooretown.hours.wednesday, "4PM - 8PM");
+  // The site links Inwood's heading to Grand Bend's page; don't pass that on.
+  const inwood = branches.find((b) => b.code === "14")!;
+  assert.equal(inwood.url, undefined);
+  assert.equal(inwood.hours.tuesday, "4PM - 8PM");
 });
 
-test("hours: missing table is an error, not an empty list", () => {
-  assert.throws(() => parseHoursTable("<html><body>maintenance</body></html>"), /hours table not found/);
+test("hours: a page without branch sections is an error, not an empty list", () => {
+  assert.throws(() => parseHoursPage("<html><body>maintenance</body></html>"), /no branch hours found/);
 });
 
 test("libraryToday uses Toronto time", () => {

@@ -1,0 +1,132 @@
+{
+ "entityType": "Instance",
+ "id": "abfdc037-d472-11f1-ad98-bd72daaf245f",
+ "agent": [
+  {
+   "item": {
+    "entityType": "Agent",
+    "id": "6188ffd0-f96a-11eb-b0ae-3168b2edd4c7",
+    "label": "Weir, Andy."
+   },
+   "linkType": {
+    "id": "contribution",
+    "attributes": {
+     "role": "aut",
+     "sequentialDesignation": "000001"
+    }
+   }
+  }
+ ],
+ "work": [
+  {
+   "item": {
+    "type": [
+     "text"
+    ],
+    "genreForm": [
+     "Science fiction.",
+     "fiction"
+    ],
+    "summary": [
+     {
+      "label": "Ryland Grace is the sole survivor on a desperate, last-chance mission--and if he fails, humanity and the earth itself will perish. Except that right now, he doesn't know that. He can't even remember his own name, let alone the nature of his assignment or how to complete it. All he knows is that he's been asleep for a very, very long time. And he's just been awakened to find himself millions of miles from home, with nothing but two corpses for company. His crewmates dead, his memories fuzzily returning, Ryland realizes that an impossible task now confronts him. Hurtling through space on this tiny ship, it's up to him to puzzle out an impossible scientific mystery--and conquer an extinction-level threat to our species. And with the clock ticking down and the nearest human being light-years away, he's got to do it all alone. Or does he?"
+     }
+    ],
+    "classification": [
+     {
+      "classificationPortion": [
+       "[Fic]"
+      ]
+     }
+    ]
+   }
+  }
+ ],
+ "concept": [
+  {
+   "item": {
+    "entityType": "Concept",
+    "id": "1f541f77-f93d-11eb-9127-215ea76a2a8f",
+    "label": "Astronauts--Fiction"
+   }
+  },
+  {
+   "item": {
+    "entityType": "Concept",
+    "id": "fa399fa0-0104-11ec-9664-416beb509ee4",
+    "label": "Memory disorders--Fiction"
+   }
+  },
+  {
+   "item": {
+    "entityType": "Concept",
+    "id": "4621e6a4-f93d-11eb-b0ae-21f317ec016d",
+    "label": "Survival--Fiction"
+   }
+  }
+ ],
+ "type": "print",
+ "extent": [
+  "476 pages :"
+ ],
+ "recordId": [
+  "57455"
+ ],
+ "issuance": [
+  "monograph"
+ ],
+ "dimensions": [
+  "25 cm"
+ ],
+ "editionStatement": [
+  "First edition."
+ ],
+ "provisionActivityStatement": [
+  "New York : Ballantine Books, 2021."
+ ],
+ "title": [
+  {
+   "type": "title",
+   "label": "Project Hail Mary : a novel",
+   "mainTitle": "Project Hail Mary :"
+  }
+ ],
+ "identifiedBy": [
+  {
+   "type": "shelfMark",
+   "value": "FIC WEIR"
+  },
+  {
+   "type": "isbn",
+   "value": "9780593135204"
+  },
+  {
+   "type": "isbn",
+   "value": "0593135202"
+  },
+  {
+   "type": "local",
+   "value": "414594"
+  }
+ ],
+ "nonBibframe": {
+  "preferredCallNumber": [
+   {
+    "callNumber": "FIC WEIR",
+    "tag": "998"
+   }
+  ]
+ },
+ "$title": [
+  "Project Hail Mary : a novel"
+ ],
+ "$materialType": [
+  "1"
+ ],
+ "$publicationDate": [
+  "2021"
+ ],
+ "$language": [
+  "eng"
+ ]
+}

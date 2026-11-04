@@ -1,0 +1,282 @@
+{
+ "totalPages": 3,
+ "page": 0,
+ "totalResults": 6,
+ "data": [
+  {
+   "id": "d3b32e6c-66c7-5894-a2fd-f919811660ae",
+   "entityType": "FormatGroup",
+   "title": "Watership Down",
+   "publicationDate": "2010-2019",
+   "primaryAgent": {
+    "id": "772b69fc-f96c-11eb-9127-abc9965dbd25",
+    "label": "Adams, Richard, 1920-2016."
+   },
+   "materialTabs": [
+    {
+     "name": "Book",
+     "type": "physical",
+     "availability": {
+      "isGetItSuppressed": false,
+      "status": {
+       "general": "Available"
+      },
+      "nonCirculating": false
+     },
+     "recordIds": [
+      "83963",
+      "17460"
+     ],
+     "materialTypes": [
+      "1"
+     ],
+     "locations": [
+      {
+       "code": "8",
+       "label": "Clearwater Library",
+       "availabilityStatus": "Available"
+      },
+      {
+       "code": "11",
+       "label": "Florence Library",
+       "availabilityStatus": "Available"
+      },
+      {
+       "code": "21",
+       "label": "Port Franks Library",
+       "availabilityStatus": "Available"
+      }
+     ],
+     "hasMoreLocations": false,
+     "locationsTotalResults": 3,
+     "editions": [
+      {
+       "id": "d827cb2c-d473-11f1-ad98-add779559c0b",
+       "availabilityStatus": "Available",
+       "callNumber": "J FIC ADAMS",
+       "hasItems": true,
+       "recordId": "83963",
+       "publicationDate": "2014",
+       "type": "physical",
+       "isGetItSuppressed": false,
+       "issuance": [
+        "monograph"
+       ]
+      },
+      {
+       "id": "0b8981b8-d471-11f1-ad98-5ffa173d8a9d",
+       "availabilityStatus": "Available",
+       "callNumber": "823.914",
+       "hasItems": true,
+       "recordId": "17460",
+       "publicationDate": "2013",
+       "type": "physical",
+       "isGetItSuppressed": false,
+       "issuance": [
+        "monograph"
+       ]
+      }
+     ],
+     "checkAvailabilityFromOtherSources": false,
+     "identifiedBy": {
+      "isbn": [
+       "9780141354965",
+       "0141354968",
+       "9780141350028",
+       "0141350024"
+      ],
+      "local": [
+       "242143",
+       "016307447"
+      ]
+     },
+     "translationKey": "format-group.BOOK",
+     "issuance": [
+      "monograph"
+     ],
+     "itemCount": 3,
+     "description": "Fiver could sense danger. Something terrible is about to happen to the warren he feels sure of it. And Fiver's sixth sense is never wrong, according to his brother Hazel. They had to leave immediately, and they had to persuade the other rabbits to join them. And so begins a long and perilous journey of a small band of rabbits in search of a safe home. Fiver's vision finally leads them to Watership Down, but here they face their most difficult challenge of all.",
+     "identifiers": {
+      "isbn": "9780141354965",
+      "local": "242143"
+     }
+    },
+    {
+     "name": "Eaudiobook",
+     "type": "electronic",
+     "availability": {
+      "isGetItSuppressed": false,
+      "urls": [
+       "https://link.overdrive.com?websiteID=448&titleID=4336323",
+       "https://samples.overdrive.com/?crid=5474d1ac-68ce-451c-9e1c-019a2d2c78f0&.epub-sample.overdrive.com",
+       "https://samples.overdrive.com/?crid=6F4E3409-A7FD-475E-8B08-88692266E2B2&.epub-sample.overdrive.com",
+       "https://link.overdrive.com?websiteID=448&titleID=309691"
+      ],
+      "status": {
+       "general": "CheckAvailability",
+       "electronicLocator": "Available"
+      },
+      "vendors": {
+       "overdrive": {
+        "reserveId": [
+         "5474d1ac-68ce-451c-9e1c-019a2d2c78f0",
+         "6f4e3409-a7fd-475e-8b08-88692266e2b2"
+        ]
+       }
+      },
+      "nonCirculating": false
+     },
+     "recordIds": [
+      "5474d1ac-68ce-451c-9e1c-019a2d2c78f0:overdrive",
+      "6f4e3409-a7fd-475e-8b08-88692266e2b2:overdrive"
+     ],
+     "materialTypes": [
+      "41"
+     ],
+     "editions": [
+      {
+       "id": "0cf89ec8-d478-11f1-ad98-d35b58a3ad31",
+       "availabilityStatus": "Available",
+       "hasItems": false,
+       "recordId": "5474d1ac-68ce-451c-9e1c-019a2d2c78f0:overdrive",
+       "publicationDate": "2019",
+       "type": "electronic",
+       "subscriptionId": [
+        "fc63c619-649e-43a9-bc78-ba4c3f081b83"
+       ],
+       "vendors": {
+        "overdrive": {
+         "reserveId": [
+          "5474d1ac-68ce-451c-9e1c-019a2d2c78f0"
+         ]
+        }
+       },
+       "isGetItSuppressed": false
+      },
+      {
+       "id": "a0e1914f-d477-11f1-ad98-e7664f344bf9",
+       "availabilityStatus": "Available",
+       "hasItems": false,
+       "recordId": "6f4e3409-a7fd-475e-8b08-88692266e2b2:overdrive",
+       "publicationDate": "2010",
+       "type": "electronic",
+       "subscriptionId": [
+        "fc63c619-649e-43a9-bc78-ba4c3f081b83"
+       ],
+       "vendors": {
+        "overdrive": {
+         "reserveId": [
+          "6f4e3409-a7fd-475e-8b08-88692266e2b2"
+         ]
+        }
+       },
+       "isGetItSuppressed": false
+      }
+     ],
+     "checkAvailabilityFromOtherSources": true,
+     "identifiedBy": {
+      "isbn": [
+       "9781982562694",
+       "1982562692",
+       "9781483071916",
+       "148307191X"
+      ]
+     },
+     "translationKey": "material-type.41",
+     "description": "<p><strong>One of the most beloved novels of our time, Watership Down is an epic journey, a stirring tale of adventure, courage, and survival.</strong></p><p>Fiver could sense danger. Something terrible was going to happen to the warren; he felt sure of it. They had to leave immediately. So begins a long and perilous journey of survival for a small band of rabbits.</p><p>As the rabbits skirt danger at every turn, we become acquainted with the band, its humorous characters, and its compelling culture, complete with its own folk history and mythos. Fiver's vision finally leads them to Watership Down, an upland meadow. But here they face their most difficult challenges of all.</p><p>A stirring epic of courage and survival against the odds, Watership Down has become a beloved classic for all ages. Both an exciting adventure story and an involving allegory about freedom, ethics, and human nature, it has delighted generations with its unique and charming world, winning many awards and being adapted to film, television, and theater.</p>",
+     "identifiers": {
+      "isbn": "9781982562694"
+     }
+    }
+   ],
+   "identifiers": {
+    "isbn": "9780141354965",
+    "local": "242143"
+   },
+   "language": "eng"
+  },
+  {
+   "id": "a6eda7fd-2603-5a9c-ae0c-8f3c609248a6",
+   "entityType": "FormatGroup",
+   "title": "Watership Down",
+   "publicationDate": "2018",
+   "primaryAgent": {
+    "id": "87286749-f96f-11eb-9127-1fee7f58e59a",
+    "label": "Cottrell Boyce, Frank."
+   },
+   "materialTabs": [
+    {
+     "name": "Book",
+     "type": "physical",
+     "availability": {
+      "isGetItSuppressed": false,
+      "status": {
+       "general": "Available"
+      },
+      "nonCirculating": false
+     },
+     "recordIds": [
+      "40437"
+     ],
+     "materialTypes": [
+      "1"
+     ],
+     "locations": [
+      {
+       "code": "7",
+       "label": "Camlachie Library",
+       "availabilityStatus": "Available"
+      },
+      {
+       "code": "21",
+       "label": "Port Franks Library",
+       "availabilityStatus": "Available"
+      }
+     ],
+     "hasMoreLocations": false,
+     "locationsTotalResults": 2,
+     "editions": [
+      {
+       "id": "29888929-d472-11f1-ad98-e1c2d378deb6",
+       "availabilityStatus": "Available",
+       "callNumber": "J PIC COTTR",
+       "hasItems": true,
+       "recordId": "40437",
+       "publicationDate": "2018",
+       "type": "physical",
+       "isGetItSuppressed": false,
+       "issuance": [
+        "monograph"
+       ]
+      }
+     ],
+     "checkAvailabilityFromOtherSources": false,
+     "identifiedBy": {
+      "isbn": [
+       "9781509881635",
+       "1509881638"
+      ],
+      "local": [
+       "317219"
+      ]
+     },
+     "translationKey": "format-group.BOOK",
+     "issuance": [
+      "monograph"
+     ],
+     "itemCount": 2,
+     "description": "Fiver could sense danger. Something terrible is about to happen to the warren he feels sure of it. And Fiver's sixth sense is never wrong, according to his brother Hazel. They had to leave immediately, and they had to persuade the other rabbits to join them. And so begins a long and perilous journey of a small band of rabbits in search of a safe home. Fiver's vision finally leads them to Watership Down, but here they face their most difficult challenge of all.",
+     "identifiers": {
+      "isbn": "9781509881635",
+      "local": "317219"
+     }
+    }
+   ],
+   "identifiers": {
+    "isbn": "9781509881635",
+    "local": "317219"
+   },
+   "language": "eng"
+  }
+ ]
+}

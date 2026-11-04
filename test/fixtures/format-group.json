@@ -1,0 +1,259 @@
+{
+ "id": "99a72171-72d9-591e-ba3d-73610f8743df",
+ "entityType": "FormatGroup",
+ "title": "Project Hail Mary : a novel",
+ "publicationDate": "2021",
+ "primaryAgent": {
+  "id": "6188ffd0-f96a-11eb-b0ae-3168b2edd4c7",
+  "label": "Weir, Andy."
+ },
+ "materialTabs": [
+  {
+   "name": "Book",
+   "type": "physical",
+   "availability": {
+    "isGetItSuppressed": false,
+    "status": {
+     "general": "Available"
+    },
+    "nonCirculating": false
+   },
+   "recordIds": [
+    "57455"
+   ],
+   "materialTypes": [
+    "1"
+   ],
+   "locations": [
+    {
+     "code": "8",
+     "label": "Clearwater Library",
+     "availabilityStatus": "Available"
+    },
+    {
+     "code": "12",
+     "label": "Forest Library",
+     "availabilityStatus": "Available"
+    },
+    {
+     "code": "3",
+     "label": "Alvinston Library",
+     "availabilityStatus": "Unavailable"
+    },
+    {
+     "code": "5",
+     "label": "Brigden Library",
+     "availabilityStatus": "Unavailable"
+    },
+    {
+     "code": "11",
+     "label": "Florence Library",
+     "availabilityStatus": "Unavailable"
+    },
+    {
+     "code": "24",
+     "label": "Sombra Library",
+     "availabilityStatus": "Unavailable"
+    }
+   ],
+   "hasMoreLocations": false,
+   "locationsTotalResults": 6,
+   "editions": [
+    {
+     "id": "abfdc037-d472-11f1-ad98-bd72daaf245f",
+     "availabilityStatus": "Available",
+     "callNumber": "FIC WEIR",
+     "edition": "First edition.",
+     "hasItems": true,
+     "recordId": "57455",
+     "publicationDate": "2021",
+     "type": "physical",
+     "publisher": "New York : Ballantine Books, 2021.",
+     "physicalDescription": "476 pages : 25 cm",
+     "isGetItSuppressed": false,
+     "issuance": [
+      "monograph"
+     ]
+    }
+   ],
+   "checkAvailabilityFromOtherSources": false,
+   "active": true,
+   "identifiedBy": {
+    "isbn": [
+     "9780593135204",
+     "0593135202"
+    ],
+    "local": [
+     "414594"
+    ]
+   },
+   "translationKey": "format-group.BOOK",
+   "issuance": [
+    "monograph"
+   ],
+   "itemCount": 7,
+   "description": "Ryland Grace is the sole survivor on a desperate, last-chance mission--and if he fails, humanity and the earth itself will perish. Except that right now, he doesn't know that. He can't even remember his own name, let alone the nature of his assignment or how to complete it. All he knows is that he's been asleep for a very, very long time. And he's just been awakened to find himself millions of miles from home, with nothing but two corpses for company. His crewmates dead, his memories fuzzily returning, Ryland realizes that an impossible task now confronts him. Hurtling through space on this tiny ship, it's up to him to puzzle out an impossible scientific mystery--and conquer an extinction-level threat to our species. And with the clock ticking down and the nearest human being light-years away, he's got to do it all alone. Or does he?",
+   "identifiers": {
+    "isbn": "9780593135204",
+    "local": "414594"
+   }
+  },
+  {
+   "name": "Large Print",
+   "type": "physical",
+   "availability": {
+    "isGetItSuppressed": false,
+    "status": {
+     "general": "Available"
+    },
+    "nonCirculating": false
+   },
+   "recordIds": [
+    "62392"
+   ],
+   "materialTypes": [
+    "27"
+   ],
+   "locations": [
+    {
+     "code": "19",
+     "label": "Petrolia Library",
+     "availabilityStatus": "Available"
+    },
+    {
+     "code": "26",
+     "label": "Watford Library",
+     "availabilityStatus": "Available"
+    },
+    {
+     "code": "28",
+     "label": "Wyoming Library",
+     "availabilityStatus": "Available"
+    },
+    {
+     "code": "9",
+     "label": "Corunna Library",
+     "availabilityStatus": "Unavailable"
+    },
+    {
+     "code": "23",
+     "label": "Sarnia Library",
+     "availabilityStatus": "Unavailable"
+    }
+   ],
+   "hasMoreLocations": false,
+   "locationsTotalResults": 5,
+   "editions": [
+    {
+     "id": "c30bb345-d472-11f1-ad1d-0f8a50442b0c",
+     "availabilityStatus": "Available",
+     "callNumber": "LPR FIC WEIR",
+     "edition": "Large print edition.",
+     "hasItems": true,
+     "recordId": "62392",
+     "publicationDate": "2021",
+     "type": "physical",
+     "publisher": "New York : Random House Large Print, 2021.",
+     "physicalDescription": "676 pages (large print) : 24 cm",
+     "isGetItSuppressed": false,
+     "issuance": [
+      "monograph"
+     ]
+    }
+   ],
+   "checkAvailabilityFromOtherSources": false,
+   "identifiedBy": {
+    "isbn": [
+     "9780593395561",
+     "0593395565"
+    ],
+    "local": [
+     "415828"
+    ]
+   },
+   "translationKey": "material-type.27",
+   "issuance": [
+    "monograph"
+   ],
+   "itemCount": 5,
+   "description": "Ryland Grace is the sole survivor on a desperate, last-chance mission--and if he fails, humanity and the earth itself will perish. Except that right now, he doesn't know that. He can't even remember his own name, let alone the nature of his assignment or how to complete it. All he knows is that he's been asleep for a very, very long time. And he's just been awakened to find himself millions of miles from home, with nothing but two corpses for company. His crewmates dead, his memories fuzzily returning, Ryland realizes that an impossible task now confronts him. Hurtling through space on this tiny ship, it's up to him to puzzle out an impossible scientific mystery--and conquer an extinction-level threat to our species. And with the clock ticking down and the nearest human being light-years away, he's got to do it all alone. Or does he?",
+   "identifiers": {
+    "isbn": "9780593395561",
+    "local": "415828"
+   }
+  },
+  {
+   "name": "Ebook",
+   "type": "electronic",
+   "availability": {
+    "isGetItSuppressed": false,
+    "urls": [
+     "https://samples.overdrive.com/?crid=c122a37f-f984-4062-8f35-1072a99305a0&.epub-sample.overdrive.com",
+     "https://link.overdrive.com?websiteID=448&titleID=5665700"
+    ],
+    "status": {
+     "general": "CheckAvailability",
+     "electronicLocator": "Available"
+    },
+    "vendors": {
+     "overdrive": {
+      "reserveId": [
+       "c122a37f-f984-4062-8f35-1072a99305a0"
+      ]
+     }
+    },
+    "nonCirculating": false
+   },
+   "recordIds": [
+    "c122a37f-f984-4062-8f35-1072a99305a0:overdrive"
+   ],
+   "materialTypes": [
+    "36"
+   ],
+   "editions": [
+    {
+     "id": "684b5f9e-d478-11f1-ad98-4f7f84e410fb",
+     "availabilityStatus": "Available",
+     "hasItems": false,
+     "recordId": "c122a37f-f984-4062-8f35-1072a99305a0:overdrive",
+     "publicationDate": "2021",
+     "type": "electronic",
+     "publisher": "Ballantine Books: Random House Publishing Group, 2021.",
+     "subscriptionId": [
+      "fc63c619-649e-43a9-bc78-ba4c3f081b83"
+     ],
+     "vendors": {
+      "overdrive": {
+       "reserveId": [
+        "c122a37f-f984-4062-8f35-1072a99305a0"
+       ]
+      }
+     },
+     "isGetItSuppressed": false,
+     "eResourceUrls": [
+      "https://samples.overdrive.com/?crid=c122a37f-f984-4062-8f35-1072a99305a0&.epub-sample.overdrive.com",
+      "https://link.overdrive.com?websiteID=448&titleID=5665700"
+     ]
+    }
+   ],
+   "checkAvailabilityFromOtherSources": true,
+   "identifiedBy": {
+    "isbn": [
+     "9780593135211",
+     "0593135210"
+    ]
+   },
+   "translationKey": "material-type.36",
+   "description": "<b>#1 <i>NEW YORK TIMES </i>BESTSELLER &bull; Now a major motion picture starring Ryan Gosling, directed by Phil Lord and Christopher Miller, with a screenplay by Drew Goddard</b><br><b>A lone astronaut must save the earth from disaster in this &ldquo;propulsive&rdquo; (<i>Entertainment Weekly</i>), cinematic thriller full of suspense, humor, and fascinating science&mdash;from the author of <i>The Martian</i>.<br>HUGO AWARD FINALIST &bull; <i>NEW YORK TIMES</i> READER PICK: 100 BEST BOOKS OF THE 21ST CENTURY &bull; ONE OF THE YEAR&rsquo;S BEST BOOKS: <i>Parade, Newsweek, </i>New York Public Library, <i>Polygon, Shelf Awareness, She Reads, Kirkus Reviews, Library Journal</i><br></b><br>Ryland Grace is the sole survivor on a desperate, last-chance mission&mdash;and if he fails, humanity and the earth itself will perish.<br>Except that right now, he doesn&rsquo;t know that. He can&rsquo;t even remember his own name, let alone the nature of his assignment or how to complete it.<br>All he knows is that he&rsquo;s been asleep for a very, very long time. And he&rsquo;s just been awakened to find himself millions of miles from home, with nothing but two corpses for company.<br>His crewmates dead, his memories fuzzily returning, Ryland realizes that an impossible task now confronts him. Hurtling through space on this tiny ship, it&rsquo;s up to him to puzzle out an impossible scientific mystery&mdash;and conquer an extinction-level threat to our species.<br>And with the clock ticking down and the nearest human being light-years away, he&rsquo;s got to do it all alone.<br>Or does he?<br>Hailed by <i>USA Today </i>as &ldquo;an epic story of redemption, discovery, and cool speculative sci-fi,&rdquo; <i>Project Hail Mary</i> is an irresistible interstellar adventure as only Andy Weir could deliver.",
+   "identifiers": {
+    "isbn": "9780593135211"
+   }
+  }
+ ],
+ "identifiers": {
+  "isbn": "9780593135204",
+  "local": "414594"
+ },
+ "language": "eng",
+ "description": "Ryland Grace is the sole survivor on a desperate, last-chance mission--and if he fails, humanity and the earth itself will perish. Except that right now, he doesn't know that. He can't even remember his own name, let alone the nature of his assignment or how to complete it. All he knows is that he's been asleep for a very, very long time. And he's just been awakened to find himself millions of miles from home, with nothing but two corpses for company. His crewmates dead, his memories fuzzily returning, Ryland realizes that an impossible task now confronts him. Hurtling through space on this tiny ship, it's up to him to puzzle out an impossible scientific mystery--and conquer an extinction-level threat to our species. And with the clock ticking down and the nearest human being light-years away, he's got to do it all alone. Or does he?"
+}

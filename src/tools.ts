@@ -1,9 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { IguanaError, SEARCH_INDEXES } from "./iguana.ts";
-import type { IguanaClient } from "./iguana.ts";
+import { VegaError, SEARCH_TYPES } from "./vega.ts";
+import type { VegaClient } from "./vega.ts";
 import { fetchBranchHours, libraryToday } from "./hours.ts";
-import { BRANCHES, HOLD_RULES, HOURS_URL, LOAN_RULES, PICKUP_LOCATIONS, RESERVE_CONFIG } from "./lambton.ts";
+import { BRANCHES, HOLD_RULES, HOURS_URL, LOAN_RULES, PICKUP_LOCATIONS } from "./lambton.ts";
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -12,13 +12,16 @@ async function run(fn: () => Promise<unknown>): Promise<ToolResult> {
     const value = await fn();
     return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
   } catch (e) {
-    const msg = e instanceof IguanaError ? `${e.code}: ${e.message}` : e instanceof Error ? e.message : String(e);
+    const msg = e instanceof VegaError ? `${e.code}: ${e.message}` : e instanceof Error ? e.message : String(e);
     return { content: [{ type: "text", text: msg }], isError: true };
   }
 }
 
-export function registerTools(server: McpServer, client: IguanaClient): void {
-  const recordId = z.string().regex(/^\d+\.\d+$/).describe('Catalogue record id, e.g. "1.750133"');
+export function registerTools(server: McpServer, client: VegaClient): void {
+  const recordId = z
+    .string()
+    .regex(/^\d+$/)
+    .describe('Catalogue record id (Sierra bib number) from an edition in search_catalogue, e.g. "57455"');
 
   // ---- Catalogue ----------------------------------------------------------------
 
@@ -27,15 +30,18 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     {
       title: "Search catalogue",
       description:
-        "Search the Lambton County Library catalogue. Results are either single records (kind=record) or " +
-        "clusters grouping several formats of one work (kind=cluster). A cluster's versions (Fiction, Large print, " +
-        "eBook, ...) each list their own records; use those record ids with get_record, get_availability and place_hold, " +
-        "never the cluster id. eBook/eAudiobook records have no physical copies.",
+        "Search the Lambton County Library catalogue. Each hit is one work; its formats (Book, Large Print, DVD, " +
+        "Kit, ...) each list editions with a recordId, plus which branches hold that format and whether a copy is " +
+        "available there. Use an edition's recordId with get_record, get_availability and place_hold. " +
+        "Formats marked electronic are Libby/OverDrive titles: they can't be used with these tools; point the user to Libby.",
       inputSchema: {
         query: z.string().min(1),
-        index: z.enum(Object.keys(SEARCH_INDEXES) as [keyof typeof SEARCH_INDEXES]).default("keyword"),
+        index: z
+          .enum(Object.keys(SEARCH_TYPES) as [keyof typeof SEARCH_TYPES])
+          .default("keyword")
+          .describe("keyword also matches ISBN and UPC"),
         limit: z.number().int().min(1).max(50).default(10),
-        start: z.number().int().min(1).default(1).describe("1-based offset for paging"),
+        page: z.number().int().min(1).default(1).describe("1-based page number"),
         sort: z.enum(["relevance", "newest", "title", "author"]).default("relevance"),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
@@ -47,7 +53,9 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     "get_record",
     {
       title: "Get record details",
-      description: "Full bibliographic details for one catalogue record, plus a per-branch availability summary.",
+      description:
+        "Full bibliographic details for one catalogue record (summary, contributors, subjects, ISBN), a per-branch " +
+        "availability summary, and the recordIds of the work's other formats and editions.",
       inputSchema: { recordId },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -58,11 +66,13 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     "get_availability",
     {
       title: "Get item availability",
-      description: "Every physical copy of a record: branch, shelfmark, status (inthelibrary, onloan, ...) and hold count.",
+      description:
+        "Every physical copy of a record: branch, call number, status (In, Out, Held, Shipped = in transit between " +
+        "branches, ...), available flag and due date for copies on loan.",
       inputSchema: { recordId },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    ({ recordId }) => run(() => client.getHoldings(recordId)),
+    ({ recordId }) => run(() => client.getAvailability(recordId)),
   );
 
   server.registerTool(
@@ -81,7 +91,7 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     {
       title: "Branch hours",
       description:
-        "Regular weekly opening hours for each branch, from the library website. hours maps each weekday to an " +
+        "Regular weekly opening hours, address and phone for each branch, from the library website. hours maps each weekday to an " +
         'opening range like "10AM - 3PM", or null when closed that day. A note such as "Temporarily closed" ' +
         "overrides the listed hours. today is the current date, weekday and time in the library's timezone. " +
         "Statutory-holiday closures aren't listed; point the user to the branch url to confirm.",
@@ -90,7 +100,7 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
           .string()
           .min(1)
           .optional()
-          .describe('Branch name or location code, e.g. "Petrolia" or "LCL/PETR". Omit for all branches.'),
+          .describe('Branch name or location code, e.g. "Petrolia" or "19". Omit for all branches.'),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -112,7 +122,9 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     "account_summary",
     {
       title: "Account summary",
-      description: "Counts of loans, overdue items, holds and holds ready for pickup on the configured library card.",
+      description:
+        "Counts of loans, overdue items, holds and holds ready for pickup on the configured library card, plus " +
+        "money owed (dollars), card expiry date and home library.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -124,14 +136,15 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     {
       title: "List current loans",
       description:
-        "Items currently checked out on the library card, with due dates (YYYYMMDD) and renewal info: " +
-        "renewalCounter is how many times the item has been renewed, isReserved=1 means another patron has it on hold, " +
-        "and renewalException gives the reason it can't be renewed right now, if any. " +
+        "Items currently checked out on the library card, soonest due first. dueDate is an ISO timestamp in UTC " +
+        "(end of the due day in Ontario). renewals is how many times it has been renewed; canRenew=false means " +
+        "it can't be renewed right now (limit reached or another patron has it on hold). source=overdrive marks " +
+        "Libby e-content, which returns itself and is renewed in the Libby app, not with renew_loans. " +
         LOAN_RULES,
       inputSchema: { limit: z.number().int().min(1).max(200).default(100) },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    ({ limit }) => run(() => client.loans(1, limit)),
+    ({ limit }) => run(() => client.loans(limit)),
   );
 
   server.registerTool(
@@ -139,12 +152,13 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     {
       title: "Renew loans",
       description:
-        "Renew checked-out items by barcode (from list_loans). Returns per-item success or refusal reason. " +
+        "Renew checked-out items by checkoutId (from list_loans). Returns per-item success with the new due date, " +
+        "or the refusal reason. " +
         LOAN_RULES,
-      inputSchema: { barcodes: z.array(z.string().min(1)).min(1) },
+      inputSchema: { checkoutIds: z.array(z.string().min(1)).min(1) },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    ({ barcodes }) => run(() => client.renew(barcodes)),
+    ({ checkoutIds }) => run(() => client.renew(checkoutIds)),
   );
 
   server.registerTool(
@@ -152,11 +166,13 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     {
       title: "List holds",
       description:
-        "Holds (reservations) on the library card: queue position, pickup branch, ready-for-pickup status. " + HOLD_RULES,
+        "Holds on the library card: status (waiting, in transit, ready for pickup, ...), queue position, pickup " +
+        "branch and expiry. " +
+        HOLD_RULES,
       inputSchema: { limit: z.number().int().min(1).max(200).default(100) },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    ({ limit }) => run(() => client.holds(1, limit)),
+    ({ limit }) => run(() => client.holds(limit)),
   );
 
   server.registerTool(
@@ -164,34 +180,35 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     {
       title: "Place hold",
       description:
-        "Place a hold on a catalogue record (not a cluster id) for pickup at a branch. " +
-        "Use list_branches for valid pickupLocation codes. " +
+        "Place a hold on a catalogue record (an edition's recordId) for pickup at a branch. " +
+        "pickupLocation is a branch code from list_branches' pickupLocations; the server checks it against the " +
+        "record's own pickup list and names the valid ones if it doesn't fit. " +
         HOLD_RULES,
       inputSchema: {
         recordId,
-        pickupLocation: z.enum(PICKUP_LOCATIONS.map((p) => p.code) as [string, ...string[]]),
+        pickupLocation: z.string().regex(/^\d+$/).describe('Branch code, e.g. "19" for Petrolia'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    ({ recordId, pickupLocation }) => run(() => client.placeHold(recordId, pickupLocation, RESERVE_CONFIG)),
+    ({ recordId, pickupLocation }) => run(() => client.placeHold(recordId, pickupLocation)),
   );
 
   server.registerTool(
     "cancel_holds",
     {
       title: "Cancel holds",
-      description: "Cancel holds by reservation number (from list_holds). Loses the queue position; cannot be undone.",
-      inputSchema: { reservationNumbers: z.array(z.string().min(1)).min(1) },
+      description: "Cancel holds by holdId (from list_holds). Loses the queue position; cannot be undone.",
+      inputSchema: { holdIds: z.array(z.string().min(1)).min(1) },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
     },
-    ({ reservationNumbers }) => run(() => client.cancelHolds(reservationNumbers)),
+    ({ holdIds }) => run(() => client.cancelHolds(holdIds)),
   );
 
   server.registerTool(
     "list_fines",
     {
       title: "List fines and fees",
-      description: "Outstanding fines and fees on the library card. Amounts are in cents.",
+      description: "Outstanding fines and fees on the library card. Amounts are in dollars.",
       inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -202,10 +219,12 @@ export function registerTools(server: McpServer, client: IguanaClient): void {
     "loan_history",
     {
       title: "Loan history",
-      description: "Previously borrowed items (only if loan history is enabled on the account).",
+      description:
+        "Previously borrowed items, newest first. Only available if reading history is turned on for the card; " +
+        "otherwise returns enabled=false.",
       inputSchema: { limit: z.number().int().min(1).max(200).default(50) },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    ({ limit }) => run(() => client.loanHistory(1, limit)),
+    ({ limit }) => run(() => client.loanHistory(limit)),
   );
 }

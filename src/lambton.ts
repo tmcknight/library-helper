@@ -1,69 +1,63 @@
-// Site configuration for Lambton County Library, taken from the live OPAC's
-// Service.Search.cls metadata and Config.srch_resv_* settings (2026-10).
+// Site configuration for Lambton County Library, which moved to Innovative's Vega Discover
+// (backed by Sierra) in late October 2026. Values come from the portal's config.js and
+// the API's own dictionaries (2026-11).
 
-import type { ReserveConfig } from "./iguana.ts";
+export const SITE = {
+  // The portal's hostname. The API identifies the library by it (iii-customer-domain).
+  portalDomain: "lcl.ca.iiivega.com",
+  apiUrl: "https://ca.iiivega.com",
+  // Keycloak: realm is the portal hostname's first label; the web app is the public
+  // "convergence" client.
+  authUrl: "https://auth.ca.iiivega.com/auth/realms/lcl/protocol/openid-connect",
+  clientId: "convergence",
+} as const;
 
-const NAMES: Record<string, string> = {
-  "LCL/ALVI": "Alvinston Branch",
-  "LCL/ARKO": "Arkona Branch",
-  "LCL/BRIG": "Brigden Branch",
-  "LCL/CAML": "Camlachie Branch",
-  "LCL/CLWR": "Clearwater Branch",
-  "LCL/CORU": "Corunna Branch",
-  "LCL/COUR": "Courtright Branch",
-  "LCL/FLOR": "Florence Branch",
-  "LCL/FORE": "Forest Branch",
-  "LCL/GRBE": "Grand Bend Branch",
-  "LCL/INWO": "Inwood Branch",
-  "LCL/HEAD": "Library Headquarters",
-  "LCL/MOOR": "Mooretown Branch",
-  "LCL/OILS": "Oil Springs Branch",
-  "LCL/PETR": "Petrolia Branch",
-  "LCL/PTED": "Point Edward Branch",
-  "LCL/PTFR": "Port Franks Branch",
-  "LCL/PTLA": "Port Lambton Branch",
-  "LCL/SARN": "Sarnia Branch",
-  "LCL/SHET": "Shetland Branch",
-  "LCL/SOMB": "Sombra Branch",
-  "LCL/THED": "Thedford Branch",
-  "LCL/WATF": "Watford Branch",
-  "LCL/WILK": "Wilkesport Branch",
-  "LCL/WYOM": "Wyoming Branch",
-  "LCL/LAMR": "Lambton County Archives",
-  "LCL/BKMB": "Mobile Library - Program Registration Required",
-  "LCL/MAIL": "Library By Mail - Program Registration Required",
-};
+// Sierra location codes from GET api/search-result/customer/locations. Codes 1 and 2 are
+// the system itself; 29-31 ("Zfuture Library n") are placeholders. Neither is a branch.
+export const BRANCHES: { code: string; name: string }[] = [
+  ["3", "Alvinston Library"],
+  ["4", "Arkona Library"],
+  ["5", "Brigden Library"],
+  ["6", "Bright's Grove Library"],
+  ["7", "Camlachie Library"],
+  ["8", "Clearwater Library"],
+  ["9", "Corunna Library"],
+  ["10", "Courtright Library"],
+  ["11", "Florence Library"],
+  ["12", "Forest Library"],
+  ["13", "Grand Bend Library"],
+  ["14", "Inwood Library"],
+  ["15", "Lambton County Archives"],
+  ["16", "Library Headquarters"],
+  ["17", "Mooretown Library"],
+  ["18", "Oil Springs Library"],
+  ["19", "Petrolia Library"],
+  ["20", "Point Edward Library"],
+  ["21", "Port Franks Library"],
+  ["22", "Port Lambton Library"],
+  ["23", "Sarnia Library"],
+  ["24", "Sombra Library"],
+  ["25", "Thedford Library"],
+  ["26", "Watford Library"],
+  ["27", "Wilkesport Library"],
+  ["28", "Wyoming Library"],
+].map(([code, name]) => ({ code, name }));
 
-const named = (codes: string[]) => codes.map((code) => ({ code, name: NAMES[code] ?? code }));
+const NAMES = new Map(BRANCHES.map((b) => [b.code, b.name]));
+export const branchName = (code: string | undefined): string | undefined => (code ? (NAMES.get(code) ?? code) : undefined);
 
-export const BRANCHES = named(
-  "ALVI ARKO BRIG CAML CLWR CORU COUR FLOR FORE GRBE INWO HEAD MOOR OILS PETR PTED PTFR PTLA SARN SHET SOMB THED WATF WILK WYOM LAMR"
-    .split(" ")
-    .map((c) => `LCL/${c}`),
-);
-
-const PICKUP_CODES =
-  "LCL/ALVI,LCL/ARKO,LCL/BRIG,LCL/CAML,LCL/CLWR,LCL/CORU,LCL/COUR,LCL/FLOR,LCL/FORE,LCL/GRBE,LCL/INWO,LCL/MOOR,LCL/OILS,LCL/PETR,LCL/PTED,LCL/PTFR,LCL/PTLA,LCL/SARN,LCL/SOMB,LCL/THED,LCL/WILK,LCL/WYOM,LCL/BKMB,LCL/MAIL";
-
-export const PICKUP_LOCATIONS = named(PICKUP_CODES.split(","));
-
-export const RESERVE_CONFIG: ReserveConfig = {
-  type: "PickupChosenByUser",
-  reservationLocations:
-    "LCL/ALVI,LCL/ARKO,LCL/BRIG,LCL/CAML,LCL/CLWR,LCL/CORU,LCL/COUR,LCL/FLOR,LCL/FORE,LCL/GRBE,LCL/INWO,LCL/HEAD,LCL/MOOR,LCL/OILS,LCL/PETR,LCL/PTED,LCL/PTFR,LCL/SARN,LCL/PTLA,LCL/SOMB,LCL/THED,LCL/WILK,LCL/WYOM,LCL/BKMB",
-  pickupLocations: PICKUP_CODES,
-  fields: "HdrPickupLocation",
-};
+// Pickup locations offered by the hold form (POST gates/request-form), 2026-11. place_hold
+// re-reads the live list for the record, so this is only for list_branches.
+export const PICKUP_LOCATIONS = BRANCHES.filter((b) => !["6", "15", "17"].includes(b.code));
 
 // Borrowing rules from the Circulation Policy (R02.02, rev. Aug 2023). The server enforces
 // these; they're here so the model can explain a refusal or plan ahead instead of guessing.
 export const LOAN_RULES =
   "Library rules: items can be renewed up to a maximum of three loan periods; an item another patron " +
-  "has on hold (isReserved=1) cannot be renewed; items 30 days overdue are treated as lost and a " +
-  "replacement fee is invoiced.";
+  "has on hold cannot be renewed; items 30 days overdue are treated as lost and a replacement fee is invoiced.";
 
 export const HOLD_RULES =
   "Library rules: at most 40 holds on physical items per card at once; a ready hold is kept for pickup for 7 days.";
 
-// Opening hours aren't in Iguana; the library's main website publishes them as one table.
-export const HOURS_URL = "https://www.lclibrary.ca/en/borrow/lambton-county-library-hours.aspx";
+// Opening hours aren't in Vega; the library's main website lists every branch on one page.
+export const HOURS_URL = "https://www.lclibrary.ca/visit/locations-and-hours/";

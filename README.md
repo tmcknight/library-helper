@@ -1,24 +1,24 @@
 # library-helper
 
-MCP server for the [Lambton County Library](https://catalogue.lclibrary.ca/iguana/www.main.cls) catalogue and patron account. The site runs Infor Iguana 6.5; this server talks to the same backend endpoints the web UI uses.
+MCP server for the [Lambton County Library](https://lcl.ca.iiivega.com/portal) catalogue and patron account. Since October 2026 the library runs Innovative's Vega Discover on top of Sierra; this server talks to the same JSON API the portal uses.
 
 > [!NOTE]
-> Unofficial. Not affiliated with or endorsed by Lambton County Library or Infor. The endpoints are undocumented and may change without notice. Use your own card, keep request volume reasonable, and follow the library's terms of use.
+> Unofficial. Not affiliated with or endorsed by Lambton County Library or Innovative (Clarivate). The endpoints are undocumented and may change without notice. Use your own card, keep request volume reasonable, and follow the library's terms of use.
 
 ## Tools
 
 | Tool | Needs card | What it does |
 |---|---|---|
-| `search_catalogue` | | Keyword/title/author/subject/series/ISBN search, paged and sortable |
-| `get_record` | | Full bibliographic record + per-branch summary |
-| `get_availability` | | Every copy: branch, shelfmark, status, due date, hold count |
+| `search_catalogue` | | Keyword (incl. ISBN/UPC)/title/author/subject/series/call-number search, paged and sortable |
+| `get_record` | | Full bibliographic record, per-branch summary, other formats |
+| `get_availability` | | Every copy: branch, call number, status, due date |
 | `list_branches` | | Branch and pickup location codes |
-| `branch_hours` | | Weekly opening hours per branch, plus temporary closures |
-| `account_summary` | ✓ | Loan/hold/overdue counts |
-| `list_loans` / `renew_loans` | ✓ | Checked-out items; renew by barcode |
-| `list_holds` / `place_hold` / `cancel_holds` | ✓ | Reservations |
-| `list_fines` | ✓ | Outstanding fees (cents) |
-| `loan_history` | ✓ | Past loans, if enabled on the account |
+| `branch_hours` | | Weekly opening hours, address and phone per branch, plus temporary closures |
+| `account_summary` | ✓ | Loan/hold/overdue counts, money owed, card expiry |
+| `list_loans` / `renew_loans` | ✓ | Checked-out items (incl. Libby loans); renew by checkout id |
+| `list_holds` / `place_hold` / `cancel_holds` | ✓ | Holds |
+| `list_fines` | ✓ | Outstanding fees (dollars) |
+| `loan_history` | ✓ | Past loans, if reading history is turned on for the card |
 
 ## Setup
 
@@ -71,35 +71,35 @@ Ask in plain language; Claude picks the tools.
 
 ### A typical flow
 
-1. **Search.** `search_catalogue` with `{"query": "project hail mary", "index": "title"}`. A popular title usually comes back as a `cluster` with one entry per format (trimmed):
+1. **Search.** `search_catalogue` with `{"query": "project hail mary", "index": "title"}`. Each hit is one work, with its formats and each format's editions (trimmed):
 
    ```json
    {
-     "recordId": "1.56450",
-     "kind": "cluster",
-     "title": "Project Hail Mary",
-     "versions": [
-       { "label": "eBook",       "records": [{ "recordId": "1.785848", "reservable": false }] },
-       { "label": "Fiction",     "records": [{ "recordId": "1.693721", "reservable": true }] },
-       { "label": "Large print", "records": [{ "recordId": "1.710522", "reservable": true }] }
+     "title": "Project Hail Mary : a novel",
+     "author": "Weir, Andy.",
+     "formats": [
+       { "format": "Book",        "status": "Available", "editions": [{ "recordId": "57455" }],
+         "branches": [{ "code": "8", "name": "Clearwater Library", "available": true }] },
+       { "format": "Large Print", "status": "Available", "editions": [{ "recordId": "62392" }] },
+       { "format": "Ebook", "electronic": true, "note": "Libby/OverDrive title: borrow or hold it in the Libby app", "editions": [] }
      ]
    }
    ```
 
-2. **Pick a format.** Use a record id from `versions`, never the cluster id. eBooks have no physical copies.
-3. **Check copies.** `get_availability` with `{"recordId": "1.710522"}` lists every copy with branch, shelfmark, status and due date.
-4. **Place a hold.** `place_hold` with `{"recordId": "1.710522", "pickupLocation": "LCL/PETR"}`. `list_branches` gives the valid pickup codes.
+2. **Pick a format.** Use an edition's `recordId`. Electronic formats are Libby titles and can't be held here.
+3. **Check copies.** `get_availability` with `{"recordId": "62392"}` lists every copy with branch, call number, status and due date.
+4. **Place a hold.** `place_hold` with `{"recordId": "62392", "pickupLocation": "19"}`. `list_branches` gives the pickup codes; the server also checks the code against the record's own pickup list.
 
-Other searches: set `index` to `author`, `subject`, `series` or `isbn`, `sort` to `newest`, and page with `start` / `limit`.
+Other searches: set `index` to `author`, `subject`, `series` or `call_number`, `sort` to `newest`, and page with `page` / `limit`.
 
 ## How the site works
 
-- **Session**: `GET www.main.cls` sets the `CSPSESSIONID-*` cookie and embeds `sessionID` (the `SIDTKN`). `GET www.jsSettings.cls` then exposes the REST token in `Vfocus.Settings.uaUrl` (`Rest.Server.cls?sessionId=…&method=user/`). Idle timeout is 900 s.
-- **Every request needs a same-origin `Referer`**. Without it the server returns `200` with an empty body.
-- **Catalogue**: `POST Proxy.SearchRequest.cls` (form-encoded, `fu=BibSearch`) returns SRU-style XML. `RequestType=ResultSet_DisplayList` searches, `RecordNumber` + `TemplateId=Iguana_Full` gets a record, `RecordNumber` + `DetailedHoldings=…` gets copies.
-- **Account**: `POST Rest.Server.cls?sessionId=<token>&method=user/<action>` with JSON body `{"request": {...}}`. `user/credentials` (card + PIN) returns a patron `sessionId` that every other call passes inside `request`. Actions: `summary`, `loans`, `renewal`, `reservations`, `reserve` (multi-step: `record` → `reserve`), `cancelreservation`, `suspendreservation`, `changereservation`, `paymentsdue`, `loanhistory`, `readinglists`, …
-- **Hours** aren't in Iguana. `branch_hours` reads the table on the library website's [hours page](https://www.lclibrary.ca/en/borrow/lambton-county-library-hours.aspx) (cached for an hour).
-- Lambton-specific settings (branch codes, hold config) are in `src/lambton.ts`. Pointing `LIBRARY_BASE_URL` at another Iguana site needs those changed.
+- **API**: JSON under `https://ca.iiivega.com/api/…`. Every request carries `iii-customer-domain: lcl.ca.iiivega.com`, `iii-host-domain` (same value) and an `api-version` header (`1`, or `2` for search and the patron profile). Errors come back as `{status, type, message, error: [{message, target}]}`.
+- **Catalogue** (anonymous): `POST api/search-result/search/format-groups` searches (`searchText`, `searchType` = `everything|title|agent|concept|series|callNumber`, `sorting` = `relevance|publicationDate|title|author`). Results are *format groups* (works) with *material tabs* (formats) whose *editions* carry a Sierra bib number (`recordId`) and an instance UUID. `GET …/format-groups?recordId=` finds the group for a bib number, `GET …/instances/{uuid}` is the full record and `…/instances/{uuid}/items` the copies.
+- **Login**: Keycloak at `auth.ca.iiivega.com`, realm `lcl`, public client `convergence`. The server runs the authorization-code flow itself: `GET …/auth` gives a plain username/PIN form, posting it redirects to the portal with a `code`, and `POST …/token` exchanges it. Access tokens last 10 minutes and are refreshed with the 90-day refresh token.
+- **Account** (Bearer token): `GET api/search-result/patrons/me` (profile, `api-version: 2`, needs `listsPrefetch`), `…/patrons/me/checkouts`, `POST …/checkouts/{id}/renew`, `…/patrons/me/holds`, `POST api/search-result/gates/request-form` (pickup locations for a record), `POST …/gates/holds` (place), `DELETE …/gates/holds/{id}` (cancel), `GET …/gates/patrons/me/fines`, and `api/search-result/bookshelf/reading-history`. Ids: the patron id is the card number; holds use Sierra bib numbers with `recordType: "b"`.
+- **Hours** aren't in Vega. `branch_hours` reads the library website's [locations and hours page](https://www.lclibrary.ca/visit/locations-and-hours/) (cached for an hour).
+- Lambton-specific settings (portal domain, Keycloak realm, branch codes) are in `src/lambton.ts`; another Vega library would need those changed.
 
 ## Remote deployment
 
