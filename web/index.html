@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Library Helper</title>
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="app.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="#/">
+          <img src="icon.svg" alt="" width="28" height="28" />
+          <span>Library Helper</span>
+        </a>
+        <form class="topsearch" id="topsearch" role="search">
+          <svg class="i" aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+          <input name="q" type="search" placeholder="Search the catalogue" aria-label="Search the catalogue" autocomplete="off" />
+        </form>
+        <nav class="nav" aria-label="Main">
+          <a href="#/search" data-nav="search">Search</a>
+          <a href="#/account" data-nav="account">My account <span class="badge" id="nav-badge" hidden></span></a>
+          <a href="#/hours" data-nav="hours">Hours</a>
+        </nav>
+      </div>
+    </header>
+    <main id="app" class="container" tabindex="-1"></main>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <dialog id="dialog" class="dialog"></dialog>
+    <footer class="footer container">
+      Unofficial client for the Lambton County Library catalogue. Not affiliated with the library.
+    </footer>
+  </body>
+</html>

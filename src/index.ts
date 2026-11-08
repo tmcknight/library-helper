@@ -6,6 +6,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { authFromEnv } from "./auth.ts";
 import { VegaClient } from "./vega.ts";
 import { registerTools } from "./tools.ts";
+import { serveApi, serveStatic } from "./web.ts";
 
 const env = process.env;
 
@@ -30,6 +31,7 @@ if ((env.MCP_TRANSPORT ?? "stdio") === "stdio") {
 async function serveHttp(): Promise<void> {
   const port = Number(env.PORT ?? 3000);
   const auth = authFromEnv(env);
+  const webUi = env.WEB_UI !== "0";
 
   const http = createServer(async (req, res) => {
     const path = new URL(req.url ?? "/", "http://x").pathname;
@@ -37,7 +39,10 @@ async function serveHttp(): Promise<void> {
       res.writeHead(200).end("ok");
       return;
     }
-    if (path !== "/mcp") {
+    // Web UI: the page itself is public (no data in it); its /api calls are checked below.
+    if (req.method === "GET" && webUi && (await serveStatic(path, res))) return;
+    const isApi = webUi && (path === "/api" || path.startsWith("/api/"));
+    if (path !== "/mcp" && !isApi) {
       res.writeHead(404).end();
       return;
     }
@@ -46,6 +51,10 @@ async function serveHttp(): Promise<void> {
     } catch (e) {
       console.error("rejected request:", e instanceof Error ? e.message : e);
       res.writeHead(403, { "Content-Type": "text/plain" }).end("forbidden");
+      return;
+    }
+    if (isApi) {
+      await serveApi(client, req, res);
       return;
     }
     // Stateless: a fresh server/transport per request, no MCP session to track.
@@ -64,5 +73,8 @@ async function serveHttp(): Promise<void> {
     }
   });
 
-  http.listen(port, () => console.error(`library-helper MCP listening on :${port}/mcp (auth: ${auth.mode})`));
+  http.listen(port, () => {
+    console.error(`library-helper MCP listening on :${port}/mcp (auth: ${auth.mode})`);
+    if (webUi) console.error(`web UI on :${port}/`);
+  });
 }

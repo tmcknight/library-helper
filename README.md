@@ -92,6 +92,22 @@ Ask in plain language; Claude picks the tools.
 
 Other searches: set `index` to `author`, `subject`, `series` or `call_number`, `sort` to `newest`, and page with `page` / `limit`.
 
+## Web UI
+
+In HTTP mode the server also serves a web app at `/`: catalogue search with per-format availability, record pages with every copy and a "Place hold" button, your loans (renew one or several), holds (cancel), fines and reading history, and every branch's hours with an open-now indicator. It follows the system light/dark setting and works on a phone.
+
+```sh
+MCP_TRANSPORT=http AUTH_MODE=none LIBRARY_CARD_NUMBER=<card> LIBRARY_PIN=<pin> node src/index.ts
+# open http://localhost:3000/
+```
+
+- The page itself holds no data and is served to anyone; everything it shows comes from `/api/*`, which passes the same `AUTH_MODE` check as `/mcp`. Behind Cloudflare Access or another login proxy, protect the whole hostname and the browser's session covers both. With `bearer`, the page asks for the token once and keeps it in that browser's local storage.
+- `/api` only accepts JSON `POST`s, so another site can't submit a form that renews or cancels on your card through your login cookie.
+- Covers come from Open Library by ISBN when it has one; otherwise the page draws a plain title card.
+- Set `WEB_UI=0` to turn it off and serve only `/mcp`.
+
+The UI is plain HTML, CSS and JavaScript in `web/`, with no build step. `src/web.ts` holds its JSON API.
+
 ## How the site works
 
 - **API**: JSON under `https://ca.iiivega.com/api/…`. Every request carries `iii-customer-domain: lcl.ca.iiivega.com`, `iii-host-domain` (same value) and an `api-version` header (`1`, or `2` for search and the patron profile). Errors come back as `{status, type, message, error: [{message, target}]}`.
@@ -103,7 +119,7 @@ Other searches: set `index` to `author`, `subject`, `series` or `call_number`, `
 
 ## Remote deployment
 
-`MCP_TRANSPORT=http` serves stateless Streamable HTTP on `:$PORT/mcp`, with `/healthz` for health checks. Every `/mcp` request has to pass an auth check, because whoever reaches it can use your library card. Pick how with `AUTH_MODE`:
+`MCP_TRANSPORT=http` serves stateless Streamable HTTP on `:$PORT/mcp`, the [web UI](#web-ui) on `/`, and `/healthz` for health checks. Every `/mcp` and `/api` request has to pass an auth check, because whoever reaches it can use your library card. Pick how with `AUTH_MODE`:
 
 | `AUTH_MODE` | Use when | Works with claude.ai |
 |---|---|---|
