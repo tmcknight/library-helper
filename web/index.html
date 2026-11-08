@@ -2,8 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111311" media="(prefers-color-scheme: dark)" />
     <title>Library Helper</title>
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="app.css" />
@@ -12,8 +14,8 @@
   <body>
     <header class="topbar">
       <div class="topbar-inner">
-        <a class="brand" href="#/">
-          <img src="icon.svg" alt="" width="28" height="28" />
+        <a class="brand" href="#/" aria-label="Library Helper home">
+          <img src="icon.svg" alt="" width="26" height="26" />
           <span>Library Helper</span>
         </a>
         <form class="topsearch" id="topsearch" role="search">
@@ -21,17 +23,30 @@
           <input name="q" type="search" placeholder="Search the catalogue" aria-label="Search the catalogue" autocomplete="off" />
         </form>
         <nav class="nav" aria-label="Main">
-          <a href="#/search" data-nav="search">Search</a>
-          <a href="#/account" data-nav="account">My account <span class="badge" id="nav-badge" hidden></span></a>
-          <a href="#/hours" data-nav="hours">Hours</a>
+          <a href="#/" data-nav="">
+            <svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20h-5v-6H9v6H4z" /></svg><span>Home</span>
+          </a>
+          <a href="#/search" title="Search" data-nav="search">
+            <svg class="i" aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg><span>Search</span>
+          </a>
+          <a href="#/borrowed" title="Borrowed" data-nav="borrowed">
+            <svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" /><path d="M5 17a3 3 0 0 1 3-3h11" /></svg><span>Borrowed</span><i class="badge" id="nav-badge" hidden></i>
+          </a>
+          <a href="#/lists" title="Lists" data-nav="lists">
+            <svg class="i" aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3.5h10a1 1 0 0 1 1 1V21l-6-4-6 4V4.5a1 1 0 0 1 1-1z" /></svg><span>Lists</span>
+          </a>
+          <a href="#/account" title="Account" data-nav="account">
+            <svg class="i" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg><span>Account</span>
+          </a>
+          <a href="#/hours" title="Hours" data-nav="hours">
+            <svg class="i" aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg><span>Hours</span>
+          </a>
         </nav>
       </div>
     </header>
     <main id="app" class="container" tabindex="-1"></main>
+    <footer class="footer container">Unofficial client for the Lambton County Library catalogue. Not affiliated with the library.</footer>
     <div id="toasts" class="toasts" aria-live="polite"></div>
     <dialog id="dialog" class="dialog"></dialog>
-    <footer class="footer container">
-      Unofficial client for the Lambton County Library catalogue. Not affiliated with the library.
-    </footer>
   </body>
 </html>

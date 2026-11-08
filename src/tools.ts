@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { VegaError, SEARCH_TYPES, LIST_SORTS } from "./vega.ts";
 import type { VegaClient } from "./vega.ts";
+import * as map from "./vega-map.ts";
 import { fetchBranchHours, libraryToday } from "./hours.ts";
 import { BRANCHES, HOLD_RULES, HOURS_URL, LOAN_RULES, PICKUP_LOCATIONS } from "./lambton.ts";
 
@@ -10,7 +11,7 @@ type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean
 async function run(fn: () => Promise<unknown>): Promise<ToolResult> {
   try {
     const value = await fn();
-    return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
+    return { content: [{ type: "text", text: JSON.stringify(map.stripCovers(value), null, 2) }] };
   } catch (e) {
     const msg = e instanceof VegaError ? `${e.code}: ${e.message}` : e instanceof Error ? e.message : String(e);
     return { content: [{ type: "text", text: msg }], isError: true };
@@ -43,6 +44,10 @@ export function registerTools(server: McpServer, client: VegaClient): void {
         limit: z.number().int().min(1).max(50).default(10),
         page: z.number().int().min(1).default(1).describe("1-based page number"),
         sort: z.enum(["relevance", "newest", "title", "author"]).default("relevance"),
+        branch: z
+          .enum(BRANCHES.map((b) => b.code) as [string, ...string[]])
+          .optional()
+          .describe("Branch code (see list_branches): only titles with a copy at that branch (leaves out Libby titles)"),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -245,10 +250,15 @@ export function registerTools(server: McpServer, client: VegaClient): void {
         sort: z.enum(LIST_SORTS).default("date.desc").describe("date = when it was added to the list"),
         limit: z.number().int().min(1).max(200).default(50),
         page: z.number().int().min(1).default(1),
+        availableAt: z
+          .enum(BRANCHES.map((b) => b.code) as [string, ...string[]])
+          .optional()
+          .describe("Branch code (see list_branches): only titles with a copy on the shelf there now. Reads the first 200 titles; no paging"),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    ({ listId, sort, limit, page }) => run(() => (listId ? client.listItems(listId, { sort, limit, page }) : client.lists())),
+    ({ listId, sort, limit, page, availableAt }) =>
+      run(() => (listId ? client.listItems(listId, { sort, limit, page, availableAt }) : client.lists())),
   );
 
   // The list to use when the caller doesn't name one: the patron's first own list, else For Later.

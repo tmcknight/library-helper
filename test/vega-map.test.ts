@@ -108,7 +108,28 @@ test("hold: Sierra status codes and pickup branch names", () => {
 });
 
 test("stripCovers removes cover URLs at any depth", () => {
-  assert.deepEqual(map.stripCovers({ a: 1, coverUrl: "x", b: [{ coverUrl: {}, c: 2 }] }), { a: 1, b: [{ c: 2 }] });
+  assert.deepEqual(map.stripCovers({ a: 1, coverUrl: "x", b: [{ coverUrl: {}, cover: "y", c: 2 }] }), { a: 1, b: [{ c: 2 }] });
+});
+
+test("cover: the medium Syndetics link, without its caption fallback", () => {
+  const syn = (size: string) =>
+    `https://secure.syndetics.com/index.aspx?isbn=9780316556347/${size}.gif&client=lclvega&type=unbound&nicaption=Circe%1FMiller%1FBook`;
+  assert.equal(
+    map.cover({ small: syn("sc"), medium: syn("mc"), large: syn("lc") }),
+    "https://secure.syndetics.com/index.aspx?isbn=9780316556347%2Fmc.gif&client=lclvega&type=unbound",
+  );
+  assert.equal(map.cover({ large: syn("lc") })?.includes("lc.gif"), true);
+  // As loans and holds send them, with the ampersands HTML-escaped.
+  assert.equal(
+    map.cover({ medium: syn("mc").replaceAll("&", "&amp;") }),
+    "https://secure.syndetics.com/index.aspx?isbn=9780316556347%2Fmc.gif&client=lclvega&type=unbound",
+  );
+  assert.equal(map.cover({ medium: "https://evil.example/x.gif" }), undefined);
+  assert.equal(map.cover({ medium: "http://secure.syndetics.com/x" }), undefined);
+  assert.equal(map.cover(undefined), undefined);
+  assert.equal(map.cover("nope"), undefined);
+  assert.equal(map.loan({ id: "1", dueDate: "2026-11-20", resource: { title: "X", coverUrl: { medium: syn("mc") } } }).cover?.startsWith("https://secure.syndetics.com/"), true);
+  assert.equal(map.hold({ id: "h", resource: { coverUrl: { medium: syn("mc") } } }).cover?.includes("isbn=9780316556347"), true);
 });
 
 test("fines: total and one row per charge", () => {
@@ -160,4 +181,32 @@ test("listItems: hits with the saved edition's record id", () => {
   assert.equal(r.items[0].recordId, "33990");
   // Without personalLists, fall back to the first Sierra edition.
   assert.match(r.items[1].recordId!, /^\d+$/);
+});
+
+test("listItemsAt: keeps titles on the shelf at the branch, in list order, with the saved edition", () => {
+  const tab = (code: string, status: string) => ({
+    name: "Book",
+    type: "physical",
+    editions: [{ id: "i", recordId: "100" }],
+    locations: [{ code, label: "Petrolia Library", availabilityStatus: status }],
+  });
+  const list = [
+    { id: "b", title: "B", personalLists: [{ recordId: "200" }] },
+    { id: "a", title: "A" },
+    { id: "c", title: "C" },
+  ];
+  const found = [
+    { id: "a", title: "A", materialTabs: [tab("19", "Available")] },
+    { id: "b", title: "B", materialTabs: [tab("19", "Available")] },
+    { id: "c", title: "C", materialTabs: [tab("19", "Unavailable")] },
+  ];
+  const ok = new Set(found.filter((fg) => map.availableAt(fg, "19")).map((fg) => fg.id));
+  const r = map.listItemsAt(list, found, ok);
+  assert.deepEqual(r.items.map((i) => [i.id, i.recordId]), [["b", "200"], ["a", "100"]]);
+  assert.equal(r.total, 2);
+  assert.equal(map.availableAt(found[0], "3"), false);
+  // Cut-short list that doesn't name the branch: unknown, and which format to look up.
+  const cut = { id: "d", title: "D", materialTabs: [{ ...tab("8", "Available"), hasMoreLocations: true }] };
+  assert.equal(map.availableAt(cut, "19"), undefined);
+  assert.deepEqual(map.unlistedTabs(cut, "19"), ["Book"]);
 });
