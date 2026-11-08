@@ -85,7 +85,7 @@ function hash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) 
 function cover(title, author, { large = false, isbn } = {}) {
   const h = hash(title ?? "");
   const a = PALETTE[h % PALETTE.length], b = PALETTE[(h >> 4) % PALETTE.length];
-  const img = isbn ? html`<img alt="" loading="lazy" src="https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg?default=false" data-cover>` : "";
+  const img = isbn ? html`<img alt="" loading="lazy" src="https://covers.openlibrary.org/b/isbn/${isbn}-${large ? "L" : "M"}.jpg?default=false" data-cover>` : "";
   return html`<div class="cover${large ? " lg" : ""}" style="background:linear-gradient(150deg, ${a}, ${b})">
     <span class="t">${cleanTitle(title)}</span><span class="a">${prettyName(author)}</span>${img}</div>`;
 }
@@ -278,7 +278,7 @@ function hitCard(hit) {
   const first = hit.formats.flatMap((f) => f.editions)[0];
   const href = first ? `#/record/${first.recordId}` : null;
   return html`<article class="card hit">
-    ${href ? html`<a href="${href}" aria-hidden="true" tabindex="-1">${cover(hit.title, hit.author)}</a>` : cover(hit.title, hit.author)}
+    ${href ? html`<a href="${href}" aria-hidden="true" tabindex="-1">${cover(hit.title, hit.author, { isbn: hit.isbn })}</a>` : cover(hit.title, hit.author, { isbn: hit.isbn })}
     <div>
       <h3>${href ? html`<a href="${href}">${cleanTitle(hit.title)}</a>` : cleanTitle(hit.title)}</h3>
       <p class="muted small">${[prettyName(hit.author), hit.year].filter(Boolean).join(" · ")}</p>

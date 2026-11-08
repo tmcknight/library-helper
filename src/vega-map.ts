@@ -25,6 +25,7 @@ export interface RawMaterialTab {
   hasMoreLocations?: boolean;
   editions?: RawEdition[];
   itemCount?: number;
+  identifiers?: { isbn?: string };
 }
 
 export interface RawFormatGroup {
@@ -34,6 +35,7 @@ export interface RawFormatGroup {
   primaryAgent?: { label: string };
   language?: string;
   materialTabs?: RawMaterialTab[];
+  identifiers?: { isbn?: string };
 }
 
 export interface RawInstance {
@@ -101,6 +103,8 @@ export function searchResult(raw: { totalResults: number; totalPages: number; pa
       author: fg.primaryAgent?.label,
       year: fg.publicationDate,
       language: fg.language,
+      // For a cover image: a physical format's ISBN first, since e-book ISBNs rarely have one.
+      isbn: (fg.materialTabs ?? []).find((t) => t.type === "physical" && t.identifiers?.isbn)?.identifiers?.isbn ?? fg.identifiers?.isbn,
       formats: (fg.materialTabs ?? []).map(format),
     })),
   };

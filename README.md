@@ -103,7 +103,7 @@ MCP_TRANSPORT=http AUTH_MODE=none LIBRARY_CARD_NUMBER=<card> LIBRARY_PIN=<pin> n
 
 - The page itself holds no data and is served to anyone; everything it shows comes from `/api/*`, which passes the same `AUTH_MODE` check as `/mcp`. Behind Cloudflare Access or another login proxy, protect the whole hostname and the browser's session covers both. With `bearer`, the page asks for the token once and keeps it in that browser's local storage.
 - `/api` only accepts JSON `POST`s, so another site can't submit a form that renews or cancels on your card through your login cookie.
-- Covers come from Open Library by ISBN when it has one; otherwise the page draws a plain title card. Open Library serves its images by redirecting to `archive.org`, so the page's Content-Security-Policy allows images from `covers.openlibrary.org`, `archive.org` and `*.us.archive.org` (and nothing else off-site).
+- Covers (search results and record pages) come from Open Library by ISBN when it has one; otherwise the page draws a plain title card. Open Library serves its images by redirecting to `archive.org`, so the page's Content-Security-Policy allows images from `covers.openlibrary.org`, `archive.org` and `*.us.archive.org` (and nothing else off-site).
 - Set `WEB_UI=0` to turn it off and serve only `/mcp`.
 
 The UI is plain HTML, CSS and JavaScript in `web/`, with no build step. `src/web.ts` holds its JSON API.

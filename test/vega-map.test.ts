@@ -12,6 +12,7 @@ test("search: works with formats, editions and branch availability", () => {
 
   const hit = r.hits[0];
   assert.equal(hit.title, "Watership Down");
+  assert.equal(hit.isbn, "9780141354965");
   const book = hit.formats.find((f) => f.format === "Book")!;
   assert.equal(book.electronic, undefined);
   assert.ok(book.editions.length > 0);
