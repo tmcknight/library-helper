@@ -109,3 +109,33 @@ test("hold: Sierra status codes and pickup branch names", () => {
 test("stripCovers removes cover URLs at any depth", () => {
   assert.deepEqual(map.stripCovers({ a: 1, coverUrl: "x", b: [{ coverUrl: {}, c: 2 }] }), { a: 1, b: [{ c: 2 }] });
 });
+
+test("fines: total and one row per charge", () => {
+  const f = map.fines({
+    totalOutstandingAmount: 2.5,
+    data: [
+      { id: "f1", outstandingAmount: 2.5, type: "Overdue", creationDate: "2026-10-30", resource: { title: "Dune", materialType: "Book", coverUrl: { small: "x" } } },
+      { id: "f2", outstandingAmount: 0, type: "Lost card", description: "Replacement card" },
+    ],
+  });
+  assert.equal(f.totalOutstanding, 2.5);
+  assert.deepEqual(f.fines[0], { fineId: "f1", title: "Dune", format: "Book", type: "Overdue", amount: 2.5, date: "2026-10-30" });
+  assert.equal(f.fines[1].description, "Replacement card");
+  assert.equal(f.fines[1].title, undefined);
+  assert.deepEqual(map.fines({}), { totalOutstanding: 0, fines: [] });
+});
+
+test("historyItem: title, author, format and a Sierra record id from the format group", () => {
+  const fg = fixture("format-group.json");
+  const h = map.historyItem({ ...fg, checkoutDate: "2026-09-01", readingHistoryItemId: "rh1" });
+  assert.equal(h.title, fg.title);
+  assert.equal(h.author, fg.primaryAgent?.label);
+  assert.equal(h.format, fg.materialTabs[0].name);
+  assert.equal(h.checkedOut, "2026-09-01");
+  assert.match(h.recordId!, /^\d+$/);
+
+  // Libby-only entries have no Sierra record id.
+  const libby = map.historyItem({ id: "x", title: "Y", format: "eBook", materialTabs: [{ name: "eBook", type: "electronic", editions: [{ id: "i", recordId: "abc:overdrive" }] }] });
+  assert.equal(libby.recordId, undefined);
+  assert.equal(libby.format, "eBook");
+});

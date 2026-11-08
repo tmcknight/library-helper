@@ -26,7 +26,7 @@ function fakeClient(over: Partial<LibraryClient> = {}) {
     holds: rec("holds", []),
     placeHold: rec("placeHold", { placed: true }),
     cancelHolds: rec("cancelHolds", [{ cancelled: true }]),
-    fines: rec("fines", { totalOutstandingAmount: 0, data: [] }),
+    fines: rec("fines", { totalOutstanding: 0, fines: [] }),
     loanHistory: rec("loanHistory", { enabled: false }),
     ...over,
   } as unknown as LibraryClient;
@@ -130,7 +130,10 @@ test("http: serves the app shell with a CSP", async () => {
     const res = await fetch(`${base}/`);
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type")!, /text\/html/);
-    assert.match(res.headers.get("content-security-policy")!, /script-src 'self'/);
+    const csp = res.headers.get("content-security-policy")!;
+    assert.match(csp, /script-src 'self'/);
+    // Open Library covers redirect to archive.org mirrors.
+    assert.match(csp, /img-src [^;]*https:\/\/covers\.openlibrary\.org https:\/\/archive\.org https:\/\/\*\.us\.archive\.org/);
     assert.match(await res.text(), /<script type="module" src="app.js">/);
     assert.equal((await fetch(`${base}/app.js`)).headers.get("content-type"), "text/javascript; charset=utf-8");
   });

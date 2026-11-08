@@ -351,8 +351,8 @@ export class VegaClient {
     return results;
   }
 
-  fines() {
-    return this.api<{ totalOutstandingAmount: number; data: unknown[] }>("api/search-result/gates/patrons/me/fines", { auth: true });
+  async fines() {
+    return map.fines(await this.api<{ totalOutstandingAmount?: number; data?: map.RawFine[] }>("api/search-result/gates/patrons/me/fines", { auth: true }));
   }
 
   async loanHistory(limit = 50) {
@@ -363,11 +363,12 @@ export class VegaClient {
     if (!status.readingHistoryActivation) {
       return { enabled: false, message: "Reading history is turned off for this card. It can be turned on in the library website's account settings; it only records loans from then on." };
     }
-    const raw = await this.api<{ items: { totalResults: number; data: Json[] } }>("api/search-result/bookshelf/reading-history", {
+    // Same sort the portal uses for its reading-history page.
+    const raw = await this.api<{ items: { totalResults: number; data: map.RawHistoryItem[] } }>("api/search-result/bookshelf/reading-history", {
       auth: true,
-      query: { sortBy: "date", pageNum: 0, pageSize: limit },
+      query: { sortBy: "checkoutDate.desc", pageNum: 0, pageSize: limit },
     });
-    return { enabled: true, total: raw.items.totalResults, items: raw.items.data.map(map.stripCovers) };
+    return { enabled: true, total: raw.items.totalResults, items: raw.items.data.map(map.historyItem) };
   }
 }
 

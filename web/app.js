@@ -32,11 +32,23 @@ const DAY = 86_400_000;
 const dateFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
 const shortFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" });
 const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" });
+// "Nov 8", with the year only when it isn't this year.
+const dayFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const fmtDay = (s) => {
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s ?? "";
+  return d.getFullYear() === new Date().getFullYear() ? dayFmt.format(d) : dateFmt.format(d);
+};
 const fmtDate = (s) => (s && !Number.isNaN(Date.parse(s)) ? dateFmt.format(new Date(s)) : s ?? "");
+// Vega spells e-formats "Ebook" and "Eaudiobook".
+const formatName = (f) => (f ?? "").replace(/^E(book|audiobook)$/i, (_, w) => `e${w[0].toUpperCase()}${w.slice(1).toLowerCase()}`);
 const plural = (n, w) => `${n} ${n === 1 ? w : /(s|sh|ch|x)$/.test(w) ? `${w}es` : `${w}s`}`;
 
+// Whole calendar days from today to the due date, in local time. Libby loans are due at a
+// time of day, so counting elapsed hours would call "tomorrow night" two days away.
 function relDue(iso) {
-  const days = Math.ceil((Date.parse(iso) - Date.now()) / DAY);
+  const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(new Date(iso)) - midnight(new Date())) / DAY);
   if (days < 0) return { text: `Overdue by ${plural(-days, "day")}`, tone: "bad" };
   if (days === 0) return { text: "Due today", tone: "bad" };
   if (days <= 3) return { text: `Due in ${plural(days, "day")}`, tone: "warn" };
@@ -49,6 +61,12 @@ function prettyName(n) {
   const s = n.replace(/[.,]\s*$/, "").replace(/,\s*\d{4}-?(\d{4})?$/, "");
   const m = s.match(/^([^,]+),\s*([^,]+)$/);
   return m ? `${m[2]} ${m[1]}` : s;
+}
+// MARC language codes ("eng", "fre") to names; Intl knows the bibliographic codes too.
+const languageNames = new Intl.DisplayNames(["en"], { type: "language" });
+function languageName(code) {
+  if (!code || code === "und") return undefined;
+  try { return languageNames.of(code); } catch { return code; }
 }
 const cleanTitle = (t) => (t ?? "").replace(/\s*[/:]\s*$/, "").replace(/\s+:\s+/, ": ");
 
@@ -103,8 +121,14 @@ async function api(path, { method = "GET", body } = {}) {
   return json;
 }
 
+// Cache the promise, not the result, so pages that ask at the same time share one request.
 let config;
-const getConfig = async () => (config ??= await api("/config"));
+const getConfig = () => (config ??= api("/config").catch((e) => { config = undefined; throw e; }));
+
+// The account summary costs several library calls; callers that overlap (the nav badge and
+// the account page on first load) share one request.
+let accountInFlight;
+const getAccount = () => (accountInFlight ??= api("/account").finally(() => { accountInFlight = undefined; }));
 
 // Bearer-token deployments: ask once, remember in this browser.
 function askToken() {
@@ -170,7 +194,7 @@ async function homePage() {
   if (cfg?.hasCredentials) {
     $("#glance").innerHTML = String(html`<div class="section-head"><h2>Your card</h2><a href="#/account">View account</a></div>${loading(1)}`);
     try {
-      const s = await api("/account");
+      const s = await getAccount();
       $("#glance").innerHTML = String(html`<div class="section-head"><h2>Your card</h2><a href="#/account">View account →</a></div>${statTiles(s)}`);
     } catch (e) {
       $("#glance").innerHTML = String(html`<div class="section-head"><h2>Your card</h2></div>${errorBox(e)}`);
@@ -208,7 +232,7 @@ async function searchPage(params) {
       <input class="input" name="q" type="search" value="${q}" placeholder="Title, author, subject or ISBN" aria-label="Search" ${raw(q ? "" : "autofocus")}>
       <select class="select" name="index" aria-label="Search in">${options(INDEXES, index)}</select>
       <select class="select" name="sort" aria-label="Sort">${options(SORTS, sort)}</select>
-      <button class="btn primary">${raw(icon.search)} Search</button>
+      <button class="btn primary" aria-label="Search">${raw(icon.search)}<span class="label">Search</span></button>
     </form>
     <div id="results">${q ? loading(4) : html`<div class="empty"><h2>Search the catalogue</h2><p>Books, large print, DVDs, audiobooks and more.</p></div>`}</div>`);
   const form = $("#searchform");
@@ -244,8 +268,10 @@ async function searchPage(params) {
 function availabilityPill(status, electronic) {
   if (electronic) return html`<span class="pill accent">Libby</span>`;
   if (!status) return "";
-  const tone = /^available/i.test(status) ? "ok" : /checked out|on order|unavailable|in process/i.test(status) ? "warn" : "";
-  return html`<span class="pill ${tone}"><span class="dot"></span>${status}</span>`;
+  // Vega sends codes like "CheckedOut" and "CheckAvailability": "Checked out", "Check availability".
+  const label = status.replace(/([a-z])([A-Z])/g, (_, a, b) => `${a} ${b.toLowerCase()}`);
+  const tone = /^available/i.test(label) ? "ok" : /checked out|on order|unavailable|in process/i.test(label) ? "warn" : "";
+  return html`<span class="pill ${tone}"><span class="dot"></span>${label}</span>`;
 }
 
 function hitCard(hit) {
@@ -260,7 +286,7 @@ function hitCard(hit) {
         const ed = f.editions[0];
         const avail = f.branches?.filter((b) => b.available).length ?? 0;
         return html`<div class="format-row">
-          <span class="name">${ed ? html`<a href="#/record/${ed.recordId}">${f.format}</a>` : f.format}</span>
+          <span class="name">${ed ? html`<a href="#/record/${ed.recordId}">${formatName(f.format)}</a>` : formatName(f.format)}</span>
           ${availabilityPill(f.status, f.electronic)}
           ${!f.electronic && f.branches?.length ? html`<span class="muted small">${avail ? `in at ${plural(avail, "branch")}${f.moreBranches ? "+" : ""}` : `${plural(f.branches.length, "branch")}`}</span>` : ""}
           ${f.editions.length > 1 ? html`<span class="muted small">${f.editions.length} editions</span>` : ""}
@@ -282,12 +308,12 @@ async function recordPage(id) {
   const author = rec.contributors?.[0]?.name;
   const cfg = await getConfig().catch(() => ({}));
   const meta = [
-    ["Format", rec.format],
+    ["Format", formatName(rec.format)],
     ["Edition", rec.edition],
     ["Published", rec.published ?? rec.year],
-    ["Description", rec.extent],
+    ["Description", rec.extent?.replace(/\s*[:;,/]\s*$/, "")],
     ["Call number", rec.callNumber],
-    ["Language", rec.language],
+    ["Language", languageName(rec.language)],
     ["ISBN", rec.isbn?.join(", ")],
   ].filter(([, v]) => v);
   render(html`
@@ -306,7 +332,7 @@ async function recordPage(id) {
         ${rec.summary ? html`<p class="summary">${rec.summary}</p>` : ""}
         <dl class="meta">${meta.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>
         ${rec.subjects?.length ? html`<div><h3 style="margin-bottom:8px">Subjects</h3><div class="tags">${rec.subjects.map((s) => html`<a href="${searchHref(s.replace(/--/g, " "), "subject")}">${s.replace(/--/g, " › ")}</a>`)}</div></div>` : ""}
-        ${rec.otherFormats?.length ? html`<div><h3 style="margin-bottom:8px">Other formats &amp; editions</h3><div class="tags">${rec.otherFormats.map((f) => html`<a href="#/record/${f.recordId}">${f.format}${f.year ? ` · ${f.year}` : ""}</a>`)}</div></div>` : ""}
+        ${rec.otherFormats?.length ? html`<div><h3 style="margin-bottom:8px">Other formats &amp; editions</h3><div class="tags">${rec.otherFormats.map((f) => html`<a href="#/record/${f.recordId}">${formatName(f.format)}${f.year ? ` · ${f.year}` : ""}</a>`)}</div></div>` : ""}
       </div>
     </div>
     <div class="section-head"><h2>Copies</h2><span class="muted small" id="copy-count"></span></div>
@@ -319,13 +345,13 @@ async function recordPage(id) {
     $("#copy-count").textContent = `${avail} of ${copies.length} ${copies.length === 1 ? "copy" : "copies"} available`;
     copies.sort((a, b) => Number(b.available) - Number(a.available) || (a.branch ?? "").localeCompare(b.branch ?? ""));
     $("#copies").innerHTML = String(copies.length
-      ? html`<div class="card table-wrap"><table class="table">
-          <thead><tr><th>Branch</th><th>Call number</th><th>Status</th><th>Due</th></tr></thead>
+      ? html`<div class="card table-wrap"><table class="table copies">
+          <thead><tr><th>Branch</th><th class="call">Call number</th><th>Status</th><th>Due</th></tr></thead>
           <tbody>${copies.map((c) => html`<tr>
             <td>${c.branch}${c.volume ? html` <span class="muted small">${c.volume}</span>` : ""}</td>
-            <td>${c.callNumber}</td>
+            <td class="call">${c.callNumber}</td>
             <td><span class="pill ${c.available ? "ok" : "warn"}"><span class="dot"></span>${c.status}</span></td>
-            <td class="muted">${c.dueDate ? fmtDate(c.dueDate) : "—"}</td></tr>`)}</tbody></table></div>`
+            <td class="muted nowrap">${c.dueDate ? fmtDay(c.dueDate) : "—"}</td></tr>`)}</tbody></table></div>`
       : html`<p class="muted">No physical copies. This may be a Libby title.</p>`);
   } catch (e) {
     $("#copies").innerHTML = String(errorBox(e));
@@ -336,12 +362,12 @@ async function holdDialog(rec) {
   const cfg = await getConfig();
   let preferred = store.get("pickup", "");
   if (!preferred) {
-    const s = await api("/account").catch(() => null);
+    const s = await getAccount().catch(() => null);
     preferred = cfg.pickupLocations.find((p) => p.name === s?.preferredPickupLocation)?.code ?? "";
   }
   const dlg = $("#dialog");
   dlg.innerHTML = String(html`<form method="dialog">
-    <div><h2>Place a hold</h2><p class="muted small" style="margin-top:6px">${cleanTitle(rec.title)}${rec.format ? ` · ${rec.format}` : ""}</p></div>
+    <div><h2>Place a hold</h2><p class="muted small" style="margin-top:6px">${cleanTitle(rec.title)}${rec.format ? ` · ${formatName(rec.format)}` : ""}</p></div>
     <div class="field"><label for="pickup">Pick up at</label>
       <select id="pickup" class="select" name="pickup" required>
         <option value="">Choose a branch…</option>
@@ -383,7 +409,7 @@ async function accountPage(tab = "loans") {
     <nav class="tabs">${TABS.map(([k, l]) => html`<a href="#/account/${k}" class="${k === tab ? "active" : ""}">${l}<span class="count" data-count="${k}" hidden></span></a>`)}</nav>
     <div id="tab">${loading(3)}</div>`);
 
-  api("/account").then((s) => {
+  getAccount().then((s) => {
     $("#summary").innerHTML = String(statTiles(s));
     $("#card-meta").textContent = [s.homeLibrary && `Home: ${s.homeLibrary}`, s.cardExpires && `Card expires ${fmtDate(s.cardExpires)}`].filter(Boolean).join(" · ");
     setCount("loans", s.loans);
@@ -423,10 +449,9 @@ async function loansTab(el) {
         <div>
           <div class="title">${cleanTitle(l.title)}</div>
           <div class="sub">
-            ${l.format ? html`<span>${l.format}</span>` : ""}
-            ${l.source !== "library" ? html`<span>Libby</span>` : ""}
+            ${l.format ? html`<span>${formatName(l.format)}</span>` : ""}
+            ${l.source !== "library" ? html`<span title="${l.note ?? ""}">Libby · renew in the app</span>` : ""}
             ${l.renewalLimit != null ? html`<span>Renewed ${l.renewals ?? 0} of ${l.renewalLimit}</span>` : ""}
-            ${l.note ? html`<span>${l.note}</span>` : ""}
           </div>
         </div>
         <div class="actions">
@@ -470,7 +495,7 @@ async function holdsTab(el) {
     <div>
       <div class="title">${h.recordId ? html`<a href="#/record/${h.recordId}" style="color:inherit">${cleanTitle(h.title)}</a>` : cleanTitle(h.title)}</div>
       <div class="sub">
-        ${h.format ? html`<span>${h.format}</span>` : ""}
+        ${h.format ? html`<span>${formatName(h.format)}</span>` : ""}
         ${h.pickupLocation ? html`<span>Pickup: ${h.pickupLocation.name}</span>` : ""}
         ${h.queuePosition != null && !h.readyForPickup ? html`<span>#${h.queuePosition} in line</span>` : ""}
         ${h.expires ? html`<span>${h.readyForPickup ? "Pick up by" : "Expires"} ${fmtDate(h.expires)}</span>` : ""}
@@ -507,21 +532,17 @@ function confirmDialog(title, body, action) {
   return new Promise((resolve) => dlg.addEventListener("close", () => resolve(dlg.returnValue === "yes"), { once: true }));
 }
 
-// The fines and history payloads come from Vega as-is; pick out the likely fields.
-const pick = (o, ...keys) => keys.map((k) => k.split(".").reduce((x, p) => x?.[p], o)).find((v) => v != null && v !== "");
-
 async function finesTab(el) {
   const f = await api("/fines");
-  const items = f.data ?? [];
   el.innerHTML = String(html`<div class="card">
-    <div class="toolbar"><strong>Total outstanding</strong><strong>${money.format(f.totalOutstandingAmount ?? 0)}</strong></div>
-    ${items.length
+    <div class="toolbar"><strong>Total outstanding</strong><strong>${money.format(f.totalOutstanding)}</strong></div>
+    ${f.fines.length
       ? html`<div class="table-wrap"><table class="table"><thead><tr><th>Item</th><th>Charge</th><th>Date</th><th class="num">Amount</th></tr></thead><tbody>
-          ${items.map((x) => html`<tr>
-            <td>${cleanTitle(pick(x, "title", "resource.title", "itemTitle", "description")) || "—"}</td>
-            <td class="muted">${pick(x, "chargeType", "fineType", "type", "reason") ?? ""}</td>
-            <td class="muted">${fmtDate(pick(x, "assessedDate", "date", "createdDate", "chargeDate"))}</td>
-            <td class="num">${money.format(Number(pick(x, "outstandingAmount", "amount", "itemCharge") ?? 0))}</td></tr>`)}
+          ${f.fines.map((x) => html`<tr>
+            <td>${cleanTitle(x.title) || x.description || "—"}${x.title && x.description ? html`<div class="muted small">${x.description}</div>` : ""}</td>
+            <td class="muted">${x.type ?? ""}</td>
+            <td class="muted">${fmtDate(x.date)}</td>
+            <td class="num">${money.format(x.amount)}</td></tr>`)}
         </tbody></table></div>`
       : html`<div class="empty"><h2>All clear</h2><p>No fines or fees on this card.</p></div>`}
   </div>`);
@@ -538,13 +559,12 @@ async function historyTab(el) {
     return;
   }
   el.innerHTML = String(html`<p class="muted small" style="margin-bottom:10px">${h.total} items</p><div class="card list">${h.items.map((x) => {
-    const title = pick(x, "title", "resource.title", "name");
-    const author = pick(x, "author", "resource.author", "primaryAgent.label");
-    const date = pick(x, "checkOutDate", "date", "checkoutDate", "readingDate");
+    const title = cleanTitle(x.title);
+    const href = x.recordId ? `#/record/${x.recordId}` : searchHref(title, "title");
     return html`<div class="item"><span></span><div>
-      <div class="title"><a href="${searchHref(cleanTitle(title), "title")}" style="color:inherit">${cleanTitle(title)}</a></div>
-      <div class="sub">${author ? html`<span>${prettyName(author)}</span>` : ""}${pick(x, "materialType", "resource.materialType") ? html`<span>${pick(x, "materialType", "resource.materialType")}</span>` : ""}</div>
-    </div><div class="actions muted small">${fmtDate(date)}</div></div>`;
+      <div class="title"><a href="${href}" style="color:inherit">${title}</a></div>
+      <div class="sub">${x.author ? html`<span>${prettyName(x.author)}</span>` : ""}${x.format ? html`<span>${formatName(x.format)}</span>` : ""}</div>
+    </div><div class="actions muted small">${fmtDate(x.checkedOut)}</div></div>`;
   })}</div>`);
 }
 
@@ -619,7 +639,7 @@ function updateBadge(s) {
 }
 async function refreshBadge() {
   const cfg = await getConfig().catch(() => null);
-  if (cfg?.hasCredentials) api("/account").then(updateBadge).catch(() => {});
+  if (cfg?.hasCredentials) getAccount().then(updateBadge).catch(() => {});
 }
 
 async function route() {

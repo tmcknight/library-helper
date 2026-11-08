@@ -222,6 +222,56 @@ export function hold(h: RawHold) {
   };
 }
 
+// Shapes read from the portal bundle (the fines page and the reading-history bookshelf),
+// 2026-11; the test card had no fines and reading history off, so no live sample yet.
+export interface RawFine {
+  id: string;
+  outstandingAmount?: number;
+  type?: string; // display text, e.g. "Overdue"
+  creationDate?: string;
+  description?: string;
+  resource?: { id?: string; title?: string; materialType?: string; coverUrl?: unknown };
+}
+
+export function fines(raw: { totalOutstandingAmount?: number; data?: RawFine[] }) {
+  return {
+    totalOutstanding: raw.totalOutstandingAmount ?? 0,
+    fines: (raw.data ?? []).map((f) => ({
+      fineId: f.id,
+      title: f.resource?.title,
+      format: f.resource?.materialType,
+      type: f.type,
+      ...(f.description && { description: f.description }),
+      amount: f.outstandingAmount ?? 0,
+      date: f.creationDate,
+    })),
+  };
+}
+
+// A reading-history entry is a format group with the checkout date mixed in.
+export interface RawHistoryItem {
+  id: string;
+  title?: string;
+  primaryAgent?: { label?: string };
+  materialTabs?: RawMaterialTab[];
+  checkoutDate?: string;
+  format?: unknown;
+  readingHistoryItemId?: string;
+  [k: string]: unknown;
+}
+
+export function historyItem(h: RawHistoryItem) {
+  const tab = h.materialTabs?.[0];
+  const recordId = tab?.editions?.find((e) => /^\d+$/.test(e.recordId))?.recordId;
+  return {
+    title: h.title,
+    author: h.primaryAgent?.label,
+    format: typeof h.format === "string" && h.format ? h.format : tab?.name,
+    checkedOut: h.checkoutDate,
+    ...(recordId && { recordId }),
+  };
+}
+
 export function stripCovers<T>(v: T): T {
   if (Array.isArray(v)) return v.map(stripCovers) as T;
   if (v && typeof v === "object") {

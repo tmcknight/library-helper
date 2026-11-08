@@ -151,9 +151,11 @@ const STATIC: Record<string, { file: string; type: string }> = {
   "/icon.svg": { file: "icon.svg", type: "image/svg+xml" },
 };
 
+// Open Library answers cover requests with a redirect to archive.org (then to an
+// iaNNNNNN.us.archive.org mirror), so those hosts have to be allowed too.
 const SECURITY_HEADERS = {
   "Content-Security-Policy":
-    "default-src 'self'; img-src 'self' https://covers.openlibrary.org data:; style-src 'self' 'unsafe-inline'; script-src 'self'; " +
+    "default-src 'self'; img-src 'self' https://covers.openlibrary.org https://archive.org https://*.us.archive.org data:; style-src 'self' 'unsafe-inline'; script-src 'self'; " +
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",
