@@ -12,6 +12,7 @@ test("search: works with formats, editions and branch availability", () => {
 
   const hit = r.hits[0];
   assert.equal(hit.title, "Watership Down");
+  assert.equal(hit.isbn, "9780141354965");
   const book = hit.formats.find((f) => f.format === "Book")!;
   assert.equal(book.electronic, undefined);
   assert.ok(book.editions.length > 0);
@@ -107,5 +108,105 @@ test("hold: Sierra status codes and pickup branch names", () => {
 });
 
 test("stripCovers removes cover URLs at any depth", () => {
-  assert.deepEqual(map.stripCovers({ a: 1, coverUrl: "x", b: [{ coverUrl: {}, c: 2 }] }), { a: 1, b: [{ c: 2 }] });
+  assert.deepEqual(map.stripCovers({ a: 1, coverUrl: "x", b: [{ coverUrl: {}, cover: "y", c: 2 }] }), { a: 1, b: [{ c: 2 }] });
+});
+
+test("cover: the medium Syndetics link, without its caption fallback", () => {
+  const syn = (size: string) =>
+    `https://secure.syndetics.com/index.aspx?isbn=9780316556347/${size}.gif&client=lclvega&type=unbound&nicaption=Circe%1FMiller%1FBook`;
+  assert.equal(
+    map.cover({ small: syn("sc"), medium: syn("mc"), large: syn("lc") }),
+    "https://secure.syndetics.com/index.aspx?isbn=9780316556347%2Fmc.gif&client=lclvega&type=unbound",
+  );
+  assert.equal(map.cover({ large: syn("lc") })?.includes("lc.gif"), true);
+  // As loans and holds send them, with the ampersands HTML-escaped.
+  assert.equal(
+    map.cover({ medium: syn("mc").replaceAll("&", "&amp;") }),
+    "https://secure.syndetics.com/index.aspx?isbn=9780316556347%2Fmc.gif&client=lclvega&type=unbound",
+  );
+  assert.equal(map.cover({ medium: "https://evil.example/x.gif" }), undefined);
+  assert.equal(map.cover({ medium: "http://secure.syndetics.com/x" }), undefined);
+  assert.equal(map.cover(undefined), undefined);
+  assert.equal(map.cover("nope"), undefined);
+  assert.equal(map.loan({ id: "1", dueDate: "2026-11-20", resource: { title: "X", coverUrl: { medium: syn("mc") } } }).cover?.startsWith("https://secure.syndetics.com/"), true);
+  assert.equal(map.hold({ id: "h", resource: { coverUrl: { medium: syn("mc") } } }).cover?.includes("isbn=9780316556347"), true);
+});
+
+test("fines: total and one row per charge", () => {
+  const f = map.fines({
+    totalOutstandingAmount: 2.5,
+    data: [
+      { id: "f1", outstandingAmount: 2.5, type: "Overdue", creationDate: "2026-10-30", resource: { title: "Dune", materialType: "Book", coverUrl: { small: "x" } } },
+      { id: "f2", outstandingAmount: 0, type: "Lost card", description: "Replacement card" },
+    ],
+  });
+  assert.equal(f.totalOutstanding, 2.5);
+  assert.deepEqual(f.fines[0], { fineId: "f1", title: "Dune", format: "Book", type: "Overdue", amount: 2.5, date: "2026-10-30" });
+  assert.equal(f.fines[1].description, "Replacement card");
+  assert.equal(f.fines[1].title, undefined);
+  assert.deepEqual(map.fines({}), { totalOutstanding: 0, fines: [] });
+});
+
+test("historyItem: title, author, format and a Sierra record id from the format group", () => {
+  const fg = fixture("format-group.json");
+  const h = map.historyItem({ ...fg, checkoutDate: "2026-09-01", readingHistoryItemId: "rh1" });
+  assert.equal(h.title, fg.title);
+  assert.equal(h.author, fg.primaryAgent?.label);
+  assert.equal(h.format, fg.materialTabs[0].name);
+  assert.equal(h.checkedOut, "2026-09-01");
+  assert.match(h.recordId!, /^\d+$/);
+
+  // Libby-only entries have no Sierra record id.
+  const libby = map.historyItem({ id: "x", title: "Y", format: "eBook", materialTabs: [{ name: "eBook", type: "electronic", editions: [{ id: "i", recordId: "abc:overdrive" }] }] });
+  assert.equal(libby.recordId, undefined);
+  assert.equal(libby.format, "eBook");
+});
+
+test("list: names the For Later list and counts items", () => {
+  assert.deepEqual(map.list({ id: "a", type: "FOR_LATER", items: { totalResults: 0 } }), { listId: "a", name: "For Later", type: "for-later", count: 0 });
+  assert.deepEqual(map.list({ id: "b", name: "Personal reading list", type: "REGULAR", items: { totalResults: 8 } }), {
+    listId: "b",
+    name: "Personal reading list",
+    type: "regular",
+    count: 8,
+  });
+});
+
+test("listItems: hits with the saved edition's record id", () => {
+  const fg = fixture("search.json").data[0];
+  const r = map.listItems({ totalResults: 2, totalPages: 1, page: 0, data: [{ ...fg, personalLists: [{ recordId: "33990", listIds: ["b"] }] }, fg] });
+  assert.equal(r.page, 1);
+  assert.equal(r.items[0].id, fg.id);
+  assert.equal(r.items[0].title, "Watership Down");
+  assert.equal(r.items[0].recordId, "33990");
+  // Without personalLists, fall back to the first Sierra edition.
+  assert.match(r.items[1].recordId!, /^\d+$/);
+});
+
+test("listItemsAt: keeps titles on the shelf at the branch, in list order, with the saved edition", () => {
+  const tab = (code: string, status: string) => ({
+    name: "Book",
+    type: "physical",
+    editions: [{ id: "i", recordId: "100" }],
+    locations: [{ code, label: "Petrolia Library", availabilityStatus: status }],
+  });
+  const list = [
+    { id: "b", title: "B", personalLists: [{ recordId: "200" }] },
+    { id: "a", title: "A" },
+    { id: "c", title: "C" },
+  ];
+  const found = [
+    { id: "a", title: "A", materialTabs: [tab("19", "Available")] },
+    { id: "b", title: "B", materialTabs: [tab("19", "Available")] },
+    { id: "c", title: "C", materialTabs: [tab("19", "Unavailable")] },
+  ];
+  const ok = new Set(found.filter((fg) => map.availableAt(fg, "19")).map((fg) => fg.id));
+  const r = map.listItemsAt(list, found, ok);
+  assert.deepEqual(r.items.map((i) => [i.id, i.recordId]), [["b", "200"], ["a", "100"]]);
+  assert.equal(r.total, 2);
+  assert.equal(map.availableAt(found[0], "3"), false);
+  // Cut-short list that doesn't name the branch: unknown, and which format to look up.
+  const cut = { id: "d", title: "D", materialTabs: [{ ...tab("8", "Available"), hasMoreLocations: true }] };
+  assert.equal(map.availableAt(cut, "19"), undefined);
+  assert.deepEqual(map.unlistedTabs(cut, "19"), ["Book"]);
 });

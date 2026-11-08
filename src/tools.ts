@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { VegaError, SEARCH_TYPES } from "./vega.ts";
+import { VegaError, SEARCH_TYPES, LIST_SORTS } from "./vega.ts";
 import type { VegaClient } from "./vega.ts";
+import * as map from "./vega-map.ts";
 import { fetchBranchHours, libraryToday } from "./hours.ts";
 import { BRANCHES, HOLD_RULES, HOURS_URL, LOAN_RULES, PICKUP_LOCATIONS } from "./lambton.ts";
 
@@ -10,7 +11,7 @@ type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean
 async function run(fn: () => Promise<unknown>): Promise<ToolResult> {
   try {
     const value = await fn();
-    return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }] };
+    return { content: [{ type: "text", text: JSON.stringify(map.stripCovers(value), null, 2) }] };
   } catch (e) {
     const msg = e instanceof VegaError ? `${e.code}: ${e.message}` : e instanceof Error ? e.message : String(e);
     return { content: [{ type: "text", text: msg }], isError: true };
@@ -43,6 +44,10 @@ export function registerTools(server: McpServer, client: VegaClient): void {
         limit: z.number().int().min(1).max(50).default(10),
         page: z.number().int().min(1).default(1).describe("1-based page number"),
         sort: z.enum(["relevance", "newest", "title", "author"]).default("relevance"),
+        branch: z
+          .enum(BRANCHES.map((b) => b.code) as [string, ...string[]])
+          .optional()
+          .describe("Branch code (see list_branches): only titles with a copy at that branch (leaves out Libby titles)"),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
@@ -226,5 +231,75 @@ export function registerTools(server: McpServer, client: VegaClient): void {
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     ({ limit }) => run(() => client.loanHistory(limit)),
+  );
+
+  // ---- Reading lists --------------------------------------------------------------
+
+  const listId = z.string().uuid().describe("listId from list_reading_lists");
+
+  server.registerTool(
+    "list_reading_lists",
+    {
+      title: "Reading lists",
+      description:
+        "The patron's saved reading lists. Without listId: each list's listId, name and item count (every card has a " +
+        '"For Later" list, plus any the patron made). With listId: that list\'s titles, each like a search_catalogue hit ' +
+        "(formats, branch availability) with the recordId of the saved edition.",
+      inputSchema: {
+        listId: listId.optional(),
+        sort: z.enum(LIST_SORTS).default("date.desc").describe("date = when it was added to the list"),
+        limit: z.number().int().min(1).max(200).default(50),
+        page: z.number().int().min(1).default(1),
+        availableAt: z
+          .enum(BRANCHES.map((b) => b.code) as [string, ...string[]])
+          .optional()
+          .describe("Branch code (see list_branches): only titles with a copy on the shelf there now. Reads the first 200 titles; no paging"),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    ({ listId, sort, limit, page, availableAt }) =>
+      run(() => (listId ? client.listItems(listId, { sort, limit, page, availableAt }) : client.lists())),
+  );
+
+  // The list to use when the caller doesn't name one: the patron's first own list, else For Later.
+  async function defaultList() {
+    const lists = await client.lists();
+    const l = lists.find((x) => x.type === "regular") ?? lists[0];
+    if (!l) throw new VegaError("NoLists", "this card has no reading lists");
+    return l;
+  }
+
+  server.registerTool(
+    "add_to_list",
+    {
+      title: "Add to reading list",
+      description:
+        "Save a catalogue record to one of the patron's reading lists. Without listId it goes on their first own list " +
+        "(or For Later if they have none). Adding a title that's already on the list is harmless.",
+      inputSchema: { recordId, listId: listId.optional() },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    ({ recordId, listId }) =>
+      run(async () => {
+        const target = listId ?? (await defaultList()).listId;
+        return client.updateListItem({ recordId }, [target], []);
+      }),
+  );
+
+  server.registerTool(
+    "remove_from_list",
+    {
+      title: "Remove from reading list",
+      description: "Take a title off one reading list, or off every list it's on when listId is omitted.",
+      inputSchema: { recordId, listId: listId.optional() },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    },
+    ({ recordId, listId }) =>
+      run(async () => {
+        const { formatGroupId } = await client.getRecord(recordId);
+        const from = listId ? [listId] : (await client.listsContaining(formatGroupId)).containing;
+        if (!from.length) return { removedFrom: [], note: "that title isn't on any of your lists" };
+        return client.updateListItem({ formatGroupId, recordId }, [], from);
+      }),
   );
 }

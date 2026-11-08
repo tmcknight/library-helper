@@ -9,7 +9,7 @@ MCP server for the [Lambton County Library](https://lcl.ca.iiivega.com/portal) c
 
 | Tool | Needs card | What it does |
 |---|---|---|
-| `search_catalogue` | | Keyword (incl. ISBN/UPC)/title/author/subject/series/call-number search, paged and sortable |
+| `search_catalogue` | | Keyword (incl. ISBN/UPC)/title/author/subject/series/call-number search, paged and sortable; `branch` limits it to titles with a copy at one branch |
 | `get_record` | | Full bibliographic record, per-branch summary, other formats |
 | `get_availability` | | Every copy: branch, call number, status, due date |
 | `list_branches` | | Branch and pickup location codes |
@@ -19,6 +19,7 @@ MCP server for the [Lambton County Library](https://lcl.ca.iiivega.com/portal) c
 | `list_holds` / `place_hold` / `cancel_holds` | ✓ | Holds |
 | `list_fines` | ✓ | Outstanding fees (dollars) |
 | `loan_history` | ✓ | Past loans, if reading history is turned on for the card |
+| `list_reading_lists` / `add_to_list` / `remove_from_list` | ✓ | Saved reading lists (For Later and your own): show, add and remove titles; `availableAt` shows only what's on the shelf at one branch |
 
 ## Setup
 
@@ -92,18 +93,36 @@ Ask in plain language; Claude picks the tools.
 
 Other searches: set `index` to `author`, `subject`, `series` or `call_number`, `sort` to `newest`, and page with `page` / `limit`.
 
+## Web UI
+
+In HTTP mode the server also serves a web app at `/`: catalogue search with per-format availability, record pages with every copy and a "Place hold" button, your loans (renew one or several), holds (cancel), fines, reading history and saved reading lists (add from search results or a record page, remove from the list), and every branch's hours with an open-now indicator. It follows the system light/dark setting and works on a phone.
+
+```sh
+MCP_TRANSPORT=http AUTH_MODE=none node src/index.ts
+# open http://localhost:3000/ and sign in with your card and PIN
+```
+
+- **Sign in / out.** The web UI doesn't use `LIBRARY_CARD_NUMBER` / `LIBRARY_PIN` (those are for MCP). Each browser signs in with its own card and PIN on the Account page (or any page that needs a card) and gets its own library session; **Sign out** on the Account page ends it, including the library's own login session. The PIN is only sent to the library and isn't kept; the session is a random id in an `HttpOnly`, `SameSite=Strict` cookie (`Secure` when served over HTTPS, including behind a tunnel). Sessions live in memory: a restart, or 30 days unused, signs you out. After 10 failed sign-ins in a minute the server answers `429` for the rest of that minute.
+
+- The page itself holds no data and is served to anyone; everything it shows comes from `/api/*`, which passes the same `AUTH_MODE` check as `/mcp`. Behind Cloudflare Access or another login proxy, protect the whole hostname and the browser's session covers both. With `bearer`, the page asks for the token once and keeps it in that browser's local storage.
+- `/api` only accepts JSON `POST`s, so another site can't submit a form that renews or cancels on your card through your login cookie.
+- Covers come from the library's own cover service (Syndetics: Vega sends a link with every title, loan and hold), then Open Library by ISBN; otherwise the page draws a plain title card. The page's Content-Security-Policy allows images from `secure.syndetics.com`, `covers.openlibrary.org`, and `archive.org` / `*.us.archive.org` (where Open Library redirects), and nothing else off-site. MCP tool output leaves cover links out.
+- Set `WEB_UI=0` to turn it off and serve only `/mcp`.
+
+The UI is plain HTML, CSS and JavaScript in `web/`, with no build step. `src/web.ts` holds its JSON API.
+
 ## How the site works
 
 - **API**: JSON under `https://ca.iiivega.com/api/…`. Every request carries `iii-customer-domain: lcl.ca.iiivega.com`, `iii-host-domain` (same value) and an `api-version` header (`1`, or `2` for search and the patron profile). Errors come back as `{status, type, message, error: [{message, target}]}`.
 - **Catalogue** (anonymous): `POST api/search-result/search/format-groups` searches (`searchText`, `searchType` = `everything|title|agent|concept|series|callNumber`, `sorting` = `relevance|publicationDate|title|author`). Results are *format groups* (works) with *material tabs* (formats) whose *editions* carry a Sierra bib number (`recordId`) and an instance UUID. `GET …/format-groups?recordId=` finds the group for a bib number, `GET …/instances/{uuid}` is the full record and `…/instances/{uuid}/items` the copies.
 - **Login**: Keycloak at `auth.ca.iiivega.com`, realm `lcl`, public client `convergence`. The server runs the authorization-code flow itself: `GET …/auth` gives a plain username/PIN form, posting it redirects to the portal with a `code`, and `POST …/token` exchanges it. Access tokens last 10 minutes and are refreshed with the 90-day refresh token.
-- **Account** (Bearer token): `GET api/search-result/patrons/me` (profile, `api-version: 2`, needs `listsPrefetch`), `…/patrons/me/checkouts`, `POST …/checkouts/{id}/renew`, `…/patrons/me/holds`, `POST api/search-result/gates/request-form` (pickup locations for a record), `POST …/gates/holds` (place), `DELETE …/gates/holds/{id}` (cancel), `GET …/gates/patrons/me/fines`, and `api/search-result/bookshelf/reading-history`. Ids: the patron id is the card number; holds use Sierra bib numbers with `recordType: "b"`.
+- **Account** (Bearer token): `GET api/search-result/patrons/me` (profile, `api-version: 2`, needs `listsPrefetch`), `…/patrons/me/checkouts`, `POST …/checkouts/{id}/renew`, `…/patrons/me/holds`, `POST api/search-result/gates/request-form` (pickup locations for a record), `POST …/gates/holds` (place), `DELETE …/gates/holds/{id}` (cancel), `GET …/gates/patrons/me/fines`, and `api/search-result/bookshelf/reading-history`. Reading lists (`api-version: 2`): `GET api/search-result/personalization/lists?listsPrefetch=1` (`listsPrefetch` is how many items to inline; 0 is refused), `GET …/lists/{id}/items` (`sortBy` = `date|title` `.asc|.desc`), and `PATCH …/lists/items` with `{addTo: [listId], deleteFrom: [listId], items: [{id: formatGroupId, entityType: "FormatGroup", title, recordId}]}` to add and remove. Ids: the patron id is the card number; holds use Sierra bib numbers with `recordType: "b"`.
 - **Hours** aren't in Vega. `branch_hours` reads the library website's [locations and hours page](https://www.lclibrary.ca/visit/locations-and-hours/) (cached for an hour).
 - Lambton-specific settings (portal domain, Keycloak realm, branch codes) are in `src/lambton.ts`; another Vega library would need those changed.
 
 ## Remote deployment
 
-`MCP_TRANSPORT=http` serves stateless Streamable HTTP on `:$PORT/mcp`, with `/healthz` for health checks. Every `/mcp` request has to pass an auth check, because whoever reaches it can use your library card. Pick how with `AUTH_MODE`:
+`MCP_TRANSPORT=http` serves stateless Streamable HTTP on `:$PORT/mcp`, the [web UI](#web-ui) on `/`, and `/healthz` for health checks. Every `/mcp` and `/api` request has to pass an auth check, because whoever reaches it can use your library card. Pick how with `AUTH_MODE`:
 
 | `AUTH_MODE` | Use when | Works with claude.ai |
 |---|---|---|

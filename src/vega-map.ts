@@ -14,6 +14,7 @@ export interface RawEdition {
   publicationDate?: string;
   publisher?: string;
   type?: string;
+  coverUrl?: unknown;
 }
 
 export interface RawMaterialTab {
@@ -25,6 +26,7 @@ export interface RawMaterialTab {
   hasMoreLocations?: boolean;
   editions?: RawEdition[];
   itemCount?: number;
+  identifiers?: { isbn?: string };
 }
 
 export interface RawFormatGroup {
@@ -34,6 +36,8 @@ export interface RawFormatGroup {
   primaryAgent?: { label: string };
   language?: string;
   materialTabs?: RawMaterialTab[];
+  identifiers?: { isbn?: string };
+  coverUrl?: unknown;
 }
 
 export interface RawInstance {
@@ -89,6 +93,28 @@ export interface RawHold {
   [k: string]: unknown;
 }
 
+// ---- Covers ----------------------------------------------------------------
+
+// Vega gives every title, edition, loan and hold a coverUrl of {small, medium, large}
+// Syndetics links. Keep the medium one (the web UI swaps in large where it wants it), only
+// from Syndetics, and without nicaption: with it, a missing cover comes back as a yellow
+// card with the title printed on it rather than Syndetics' plain placeholder.
+export function cover(coverUrl: unknown): string | undefined {
+  const c = coverUrl as { small?: unknown; medium?: unknown; large?: unknown } | undefined;
+  const raw = [c?.medium, c?.large, c?.small].find((u): u is string => typeof u === "string" && u !== "");
+  if (!raw) return undefined;
+  let url: URL;
+  try {
+    // Checkout and hold links come HTML-escaped ("&amp;client=..."); search ones don't.
+    url = new URL(raw.replaceAll("&amp;", "&"));
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:" || url.hostname !== "secure.syndetics.com") return undefined;
+  url.searchParams.delete("nicaption");
+  return url.toString();
+}
+
 // ---- Catalogue -------------------------------------------------------------
 
 export function searchResult(raw: { totalResults: number; totalPages: number; page: number; data: RawFormatGroup[] }) {
@@ -96,13 +122,22 @@ export function searchResult(raw: { totalResults: number; totalPages: number; pa
     total: raw.totalResults,
     page: raw.page + 1,
     totalPages: raw.totalPages,
-    hits: raw.data.map((fg) => ({
-      title: fg.title,
-      author: fg.primaryAgent?.label,
-      year: fg.publicationDate,
-      language: fg.language,
-      formats: (fg.materialTabs ?? []).map(format),
-    })),
+    hits: raw.data.map(hit),
+  };
+}
+
+// One work. id is the format group id, which reading lists are keyed by.
+export function hit(fg: RawFormatGroup) {
+  return {
+    id: fg.id,
+    title: fg.title,
+    author: fg.primaryAgent?.label,
+    year: fg.publicationDate,
+    language: fg.language,
+    // For a cover image: a physical format's ISBN first, since e-book ISBNs rarely have one.
+    isbn: (fg.materialTabs ?? []).find((t) => t.type === "physical" && t.identifiers?.isbn)?.identifiers?.isbn ?? fg.identifiers?.isbn,
+    cover: cover(fg.coverUrl),
+    formats: (fg.materialTabs ?? []).map(format),
   };
 }
 
@@ -142,6 +177,7 @@ export function record(fg: RawFormatGroup, inst: RawInstance, recordId: string) 
     .filter((e) => e.recordId !== recordId);
   return {
     recordId,
+    formatGroupId: fg.id,
     title: inst.title?.[0]?.label ?? fg.title,
     contributors: (inst.agent ?? []).map((a) => ({ name: a.item.label, role: a.linkType?.attributes?.role })),
     format: ed?.tab.name,
@@ -153,6 +189,7 @@ export function record(fg: RawFormatGroup, inst: RawInstance, recordId: string) 
     callNumber: ids("shelfMark")[0] ?? ed?.callNumber,
     isbn: ids("isbn"),
     upc: ids("upc"),
+    cover: cover(ed?.coverUrl) ?? cover(fg.coverUrl),
     summary: work?.summary?.map((s) => s.label).join("\n\n"),
     genres: work?.genreForm,
     subjects: (inst.concept ?? []).map((c) => c.item.label),
@@ -183,6 +220,7 @@ export function loan(c: RawCheckout, now = Date.now()) {
     checkoutId: c.id,
     title: c.resource?.title,
     format: c.resource?.materialType,
+    cover: cover(c.resource?.coverUrl),
     source: physical ? "library" : c.vendor,
     checkedOut: c.checkOutDate,
     dueDate: c.dueDate,
@@ -210,6 +248,7 @@ export function hold(h: RawHold) {
     holdId: h.id,
     title: h.resource?.title,
     format: h.resource?.materialType,
+    cover: cover(h.resource?.coverUrl),
     recordId: h.recordId,
     status: HOLD_STATUS[code] ?? code,
     readyForPickup: ["i", "b", "j"].includes(code),
@@ -222,10 +261,129 @@ export function hold(h: RawHold) {
   };
 }
 
+// Shapes read from the portal bundle (the fines page and the reading-history bookshelf),
+// 2026-11; the test card had no fines and reading history off, so no live sample yet.
+export interface RawFine {
+  id: string;
+  outstandingAmount?: number;
+  type?: string; // display text, e.g. "Overdue"
+  creationDate?: string;
+  description?: string;
+  resource?: { id?: string; title?: string; materialType?: string; coverUrl?: unknown };
+}
+
+export function fines(raw: { totalOutstandingAmount?: number; data?: RawFine[] }) {
+  return {
+    totalOutstanding: raw.totalOutstandingAmount ?? 0,
+    fines: (raw.data ?? []).map((f) => ({
+      fineId: f.id,
+      title: f.resource?.title,
+      format: f.resource?.materialType,
+      ...(cover(f.resource?.coverUrl) && { cover: cover(f.resource?.coverUrl) }),
+      type: f.type,
+      ...(f.description && { description: f.description }),
+      amount: f.outstandingAmount ?? 0,
+      date: f.creationDate,
+    })),
+  };
+}
+
+// A reading-history entry is a format group with the checkout date mixed in.
+export interface RawHistoryItem {
+  id: string;
+  title?: string;
+  primaryAgent?: { label?: string };
+  materialTabs?: RawMaterialTab[];
+  checkoutDate?: string;
+  format?: unknown;
+  readingHistoryItemId?: string;
+  [k: string]: unknown;
+}
+
+export function historyItem(h: RawHistoryItem) {
+  const tab = h.materialTabs?.[0];
+  const recordId = tab?.editions?.find((e) => /^\d+$/.test(e.recordId))?.recordId;
+  return {
+    title: h.title,
+    author: h.primaryAgent?.label,
+    format: typeof h.format === "string" && h.format ? h.format : tab?.name,
+    cover: cover(h.coverUrl),
+    checkedOut: h.checkoutDate,
+    ...(recordId && { recordId }),
+  };
+}
+
+// ---- Reading lists ---------------------------------------------------------
+
+// From api/search-result/personalization/lists. Every patron has one FOR_LATER list (no
+// name; the portal calls it "For Later") and any number of REGULAR ones.
+export interface RawList {
+  id: string;
+  name?: string;
+  type: string;
+  items?: { totalResults?: number };
+}
+
+export function list(l: RawList) {
+  const forLater = l.type === "FOR_LATER";
+  return {
+    listId: l.id,
+    name: forLater ? "For Later" : (l.name ?? "Untitled list"),
+    type: forLater ? "for-later" : "regular",
+    count: l.items?.totalResults ?? 0,
+  };
+}
+
+// List entries are format groups; personalLists says which edition was saved.
+export type RawListItem = RawFormatGroup & { personalLists?: { recordId?: string; listIds?: string[] }[] };
+
+export function listItems(raw: { totalResults: number; totalPages: number; page: number; data: RawListItem[] }) {
+  return {
+    total: raw.totalResults,
+    page: raw.page + 1,
+    totalPages: raw.totalPages,
+    items: raw.data.map((fg) => ({ ...hit(fg), recordId: listRecordId(fg) })),
+  };
+}
+
+// The edition the patron saved, else the first Sierra one.
+function listRecordId(fg: RawListItem): string | undefined {
+  const saved = fg.personalLists?.find((p) => p.recordId && /^\d+$/.test(p.recordId))?.recordId;
+  return saved ?? (fg.materialTabs ?? []).flatMap((t) => t.editions ?? []).find((e) => /^\d+$/.test(e.recordId))?.recordId;
+}
+
+// Whether a title has a copy on the shelf at a branch, from its search result: true, false,
+// or undefined when a format's location list is cut short (hasMoreLocations) without naming
+// the branch, so only the full location list can say.
+export function availableAt(fg: RawFormatGroup, branch: string): boolean | undefined {
+  const tabs = (fg.materialTabs ?? []).filter((t) => t.type === "physical");
+  if (tabs.some((t) => (t.locations ?? []).some((l) => l.code === branch && l.availabilityStatus === "Available"))) return true;
+  return tabs.some((t) => t.hasMoreLocations && !(t.locations ?? []).some((l) => l.code === branch)) ? undefined : false;
+}
+
+// Formats whose location list was cut short without naming the branch.
+export function unlistedTabs(fg: RawFormatGroup, branch: string): string[] {
+  return (fg.materialTabs ?? [])
+    .filter((t) => t.type === "physical" && t.hasMoreLocations && !(t.locations ?? []).some((l) => l.code === branch))
+    .map((t) => t.name);
+}
+
+// A list narrowed to the titles in availableIds (format group ids), in list order. found:
+// the same titles from a branch-filtered search.
+export function listItemsAt(list: RawListItem[], found: RawFormatGroup[], availableIds: Set<string>) {
+  const byId = new Map(found.map((fg) => [fg.id, fg]));
+  const items = list.flatMap((item) => {
+    const fg = byId.get(item.id);
+    return fg && availableIds.has(fg.id) ? [{ ...hit(fg), recordId: listRecordId(item) ?? listRecordId(fg) }] : [];
+  });
+  return { total: items.length, page: 1, totalPages: 1, items };
+}
+
+// Cover links are for the web UI; tool output leaves them out to stay compact.
 export function stripCovers<T>(v: T): T {
   if (Array.isArray(v)) return v.map(stripCovers) as T;
   if (v && typeof v === "object") {
-    return Object.fromEntries(Object.entries(v).filter(([k]) => k !== "coverUrl").map(([k, x]) => [k, stripCovers(x)])) as T;
+    return Object.fromEntries(Object.entries(v).filter(([k]) => k !== "coverUrl" && k !== "cover").map(([k, x]) => [k, stripCovers(x)])) as T;
   }
   return v;
 }

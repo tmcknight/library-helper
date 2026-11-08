@@ -46,6 +46,10 @@ export const BRANCHES: { code: string; name: string }[] = [
 const NAMES = new Map(BRANCHES.map((b) => [b.code, b.name]));
 export const branchName = (code: string | undefined): string | undefined => (code ? (NAMES.get(code) ?? code) : undefined);
 
+// Vega material types for Libby/OverDrive content (Ebook, Eaudiobook, Emagazine). Vega
+// counts these as held at every branch, so a branch filter leaves them out.
+export const ELECTRONIC_MATERIAL_TYPES = ["36", "41", "50"];
+
 // Pickup locations offered by the hold form (POST gates/request-form), 2026-11. place_hold
 // re-reads the live list for the record, so this is only for list_branches.
 export const PICKUP_LOCATIONS = BRANCHES.filter((b) => !["6", "15", "17"].includes(b.code));
