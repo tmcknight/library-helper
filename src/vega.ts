@@ -7,13 +7,15 @@
 // portal logs in with the authorization-code flow against a plain username/PIN form,
 // which we drive directly. Access tokens last 10 minutes, refresh tokens 90 days.
 
-import { SITE, branchName } from "./lambton.ts";
+import { SITE, ELECTRONIC_MATERIAL_TYPES, branchName } from "./lambton.ts";
 import * as map from "./vega-map.ts";
 import type { RawFormatGroup, RawInstance, RawItem, RawCheckout, RawHold } from "./vega-map.ts";
 
 export interface VegaConfig {
   cardNumber?: string;
   pin?: string;
+  // What account calls say when there's no card (the web UI asks people to sign in instead).
+  noCredentialsMessage?: string;
 }
 
 export class VegaError extends Error {
@@ -64,6 +66,7 @@ export class VegaClient {
   private tokens: Tokens | null = null;
   private loggingIn: Promise<string> | null = null;
   private patronId = "";
+  private physicalTypes: { at: number; ids: Promise<string[]> } | null = null;
 
   constructor(cfg: VegaConfig) {
     this.cfg = cfg;
@@ -134,7 +137,7 @@ export class VegaClient {
 
   private async login(): Promise<string> {
     if (!this.hasCredentials) {
-      throw new VegaError("NoCredentials", "Set LIBRARY_CARD_NUMBER and LIBRARY_PIN to use account tools.");
+      throw new VegaError("NoCredentials", this.cfg.noCredentialsMessage ?? "Set LIBRARY_CARD_NUMBER and LIBRARY_PIN to use account tools.");
     }
     const redirectUri = `https://${SITE.portalDomain}/`;
     const cookies = new Map<string, string>();
@@ -173,12 +176,36 @@ export class VegaClient {
       // Keycloak re-renders the form with a message on bad credentials.
       const body = await submit.text();
       const msg = body.match(/class="alert alert-error[^"]*">\s*<span[^>]*>([^<]+)/)?.[1] ?? body.match(/id="input-error"[^>]*>\s*([^<]+)/)?.[1];
-      throw new VegaError("LoginFailed", msg ? decodeEntities(msg.trim()) : `login rejected (HTTP ${submit.status})`);
+      throw new VegaError("BadCredentials", msg ? decodeEntities(msg.trim()) : `login rejected (HTTP ${submit.status})`);
     }
     const loc = new URL(location);
     const code = loc.searchParams.get("code") ?? new URLSearchParams(loc.hash.slice(1)).get("code");
     if (!code) throw new VegaError("LoginFailed", `no authorization code in redirect: ${loc.searchParams.get("error") ?? location}`);
     return this.tokenRequest({ grant_type: "authorization_code", code, redirect_uri: redirectUri });
+  }
+
+  // Logs in now rather than on the first account call, so a wrong card or PIN shows up at once.
+  async signIn(): Promise<void> {
+    this.tokens = null;
+    await this.accessToken();
+  }
+
+  // Ends the Keycloak session (best effort: the tokens are dropped either way).
+  async signOut(): Promise<void> {
+    const refresh = this.tokens?.refresh;
+    this.tokens = null;
+    this.patronId = "";
+    if (!refresh) return;
+    try {
+      await fetch(`${SITE.authUrl}/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": UA },
+        body: new URLSearchParams({ client_id: SITE.clientId, refresh_token: refresh }).toString(),
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch {
+      // The refresh token still expires on its own.
+    }
   }
 
   private async tokenRequest(params: Record<string, string>): Promise<string> {
@@ -203,7 +230,28 @@ export class VegaClient {
 
   // ---- Catalogue (anonymous) ----------------------------------------------
 
-  async search(opts: { query: string; index?: SearchIndex; limit?: number; page?: number; sort?: SearchSort }) {
+  // Every material type except Libby's, for branch filters. Vega's location filter alone also
+  // matches Libby titles (held "everywhere"); adding the physical types narrows it to copies
+  // at that branch, since Vega applies both to the same item. Asked once a day so new
+  // formats are picked up.
+  private physicalMaterialTypes(): Promise<string[]> {
+    if (this.physicalTypes && Date.now() - this.physicalTypes.at < 86_400_000) return this.physicalTypes.ids;
+    const ids = this.api<{ data: { id: string }[] }>("api/search-result/facet/FormatGroup/Material_Type", {
+      method: "POST",
+      body: { searchText: "*", searchType: "everything", pageNum: 0, pageSize: 500 },
+    }).then((r) => r.data.map((t) => t.id).filter((id) => !ELECTRONIC_MATERIAL_TYPES.includes(id)));
+    this.physicalTypes = { at: Date.now(), ids };
+    ids.catch(() => { this.physicalTypes = null; });
+    return ids;
+  }
+
+  // Filters on titles with a copy at a branch: Vega's location filter plus every non-Libby type.
+  private async branchFilter(branch?: string) {
+    return branch ? { locationIds: [branch], materialTypeIds: await this.physicalMaterialTypes() } : {};
+  }
+
+  // branch: a branch code; only titles with a copy there (no Libby titles).
+  async search(opts: { query: string; index?: SearchIndex; limit?: number; page?: number; sort?: SearchSort; branch?: string }) {
     const [sorting, sortOrder] = SORTS[opts.sort ?? "relevance"];
     const raw = await this.api<{ totalResults: number; totalPages: number; page: number; data: RawFormatGroup[] }>(
       "api/search-result/search/format-groups",
@@ -217,9 +265,11 @@ export class VegaClient {
           sortOrder,
           pageNum: (opts.page ?? 1) - 1,
           pageSize: opts.limit ?? 10,
+          ...(await this.branchFilter(opts.branch)),
         },
       },
     );
+    if (opts.branch) await Promise.all(raw.data.map((fg) => this.addBranch(fg, opts.branch!)));
     return map.searchResult(raw);
   }
 
@@ -384,7 +434,10 @@ export class VegaClient {
     return raw.map(map.list);
   }
 
-  async listItems(listId: string, opts: { sort?: ListSort; page?: number; limit?: number } = {}) {
+  // availableAt: a branch code; only titles with a copy on the shelf there right now. That
+  // filter has no paging: it reads the first 200 titles of the list.
+  async listItems(listId: string, opts: { sort?: ListSort; page?: number; limit?: number; availableAt?: string } = {}) {
+    if (opts.availableAt) return this.listItemsAt(listId, opts.sort, opts.availableAt);
     const raw = await this.api<{ totalResults: number; totalPages: number; page: number; data: map.RawListItem[] }>(
       `${VegaClient.LISTS}/${encodeURIComponent(listId)}/items`,
       {
@@ -394,6 +447,50 @@ export class VegaClient {
       },
     );
     return map.listItems(raw);
+  }
+
+  // The list API takes no filters, so: read the list, then search just those titles with the
+  // branch filter, whose results say whether that branch has a copy in.
+  private async listItemsAt(listId: string, sort: ListSort | undefined, branch: string) {
+    const raw = await this.api<{ data: map.RawListItem[] }>(`${VegaClient.LISTS}/${encodeURIComponent(listId)}/items`, {
+      auth: true,
+      version: "2",
+      query: { sortBy: sort ?? "date.desc", pageNum: 0, pageSize: 200, filterHiddenShowcaseItems: "false" },
+    });
+    const ids = raw.data.map((fg) => fg.id);
+    const filter = await this.branchFilter(branch);
+    const chunks = Array.from({ length: Math.ceil(ids.length / 50) }, (_, i) => ids.slice(i * 50, i * 50 + 50));
+    const found = await Promise.all(
+      chunks.map((resourceIds) =>
+        this.api<{ data: RawFormatGroup[] }>("api/search-result/search/format-groups", {
+          method: "POST",
+          version: "2",
+          body: { resourceIds, pageNum: 0, pageSize: resourceIds.length, ...filter },
+        }),
+      ),
+    );
+    const titles = found.flatMap((r) => r.data);
+    await Promise.all(titles.map((fg) => this.addBranch(fg, branch)));
+    return map.listItemsAt(raw.data, titles, new Set(titles.filter((fg) => map.availableAt(fg, branch)).map((fg) => fg.id)));
+  }
+
+  // A search result lists a handful of branches per format and flags the rest. When that cut
+  // leaves out the branch being filtered on, look the format's copies up there and add the
+  // branch to its list, so the result says whether it's in. Mutates fg.
+  private async addBranch(fg: RawFormatGroup, branch: string): Promise<void> {
+    await Promise.all(
+      (fg.materialTabs ?? []).map(async (tab) => {
+        if (!map.unlistedTabs({ ...fg, materialTabs: [tab] }, branch).length) return;
+        const r = await this.api<{ available?: { code: string; label: string }[]; unavailable?: { code: string; label: string }[] }>(
+          `api/search-result/drawer/format-groups/${encodeURIComponent(fg.id)}/locations`,
+          { query: { tab: tab.name } },
+        );
+        const inShelf = r.available?.find((l) => l.code === branch);
+        const out = r.unavailable?.find((l) => l.code === branch);
+        const at = inShelf ?? out;
+        if (at) (tab.locations ??= []).unshift({ code: at.code, label: at.label, availabilityStatus: inShelf ? "Available" : "Unavailable" });
+      }),
+    );
   }
 
   // Which of the patron's lists hold a work. The API has no direct lookup, so this reads

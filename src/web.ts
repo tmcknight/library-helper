@@ -1,6 +1,7 @@
 // Web UI: a small JSON API over the same VegaClient the MCP tools use, plus the static
 // single-page app in ../web. Only served in HTTP mode. The static files hold no data, so
-// they're public; every /api request passes the same auth check as /mcp.
+// they're public; every /api request passes the same auth check as /mcp. Account routes use
+// the card the browser signed in with (see sessions.ts), never the server's env card.
 
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -8,6 +9,8 @@ import { VegaError, SEARCH_TYPES, LIST_SORTS } from "./vega.ts";
 import type { ListSort, SearchIndex, SearchSort, VegaClient } from "./vega.ts";
 import { fetchBranchHours, libraryToday } from "./hours.ts";
 import { BRANCHES, HOURS_URL, PICKUP_LOCATIONS } from "./lambton.ts";
+import { maskCard, sessionCookie, sessionId, TooManyAttempts } from "./sessions.ts";
+import type { Sessions } from "./sessions.ts";
 
 export type LibraryClient = Pick<
   VegaClient,
@@ -59,6 +62,11 @@ const uuidOf = (s: unknown, what: string) => {
   return s;
 };
 
+const branchOf = (code: string | undefined) => {
+  if (code && !BRANCHES.some((b) => b.code === code)) throw new HttpError(400, `expected a branch code, got "${code}"`);
+  return code;
+};
+
 function idList(body: unknown, key: string): string[] {
   const ids = (body as Record<string, unknown> | undefined)?.[key];
   if (!Array.isArray(ids) || !ids.length || !ids.every((x) => typeof x === "string" && x)) {
@@ -68,14 +76,20 @@ function idList(body: unknown, key: string): string[] {
 }
 
 // Routes an /api request. Returns the JSON body to send; throws HttpError or VegaError.
-export async function handleApi(client: LibraryClient, method: string, url: URL, body: unknown): Promise<unknown> {
+// `card` is the signed-in card number, if any.
+export async function handleApi(client: LibraryClient, method: string, url: URL, body: unknown, card?: string): Promise<unknown> {
   const path = url.pathname.replace(/^\/api/, "").replace(/\/$/, "") || "/";
   const q = url.searchParams;
   const route = `${method} ${path}`;
   let m: RegExpMatchArray | null;
 
   if (route === "GET /config") {
-    return { hasCredentials: client.hasCredentials, branches: BRANCHES, pickupLocations: PICKUP_LOCATIONS };
+    return {
+      hasCredentials: client.hasCredentials,
+      ...(card && { card: maskCard(card) }),
+      branches: BRANCHES,
+      pickupLocations: PICKUP_LOCATIONS,
+    };
   }
   if (route === "GET /search") {
     const query = q.get("q")?.trim();
@@ -84,7 +98,9 @@ export async function handleApi(client: LibraryClient, method: string, url: URL,
     if (!(index in SEARCH_TYPES)) throw new HttpError(400, `index must be one of ${Object.keys(SEARCH_TYPES).join(", ")}`);
     const sort = (q.get("sort") || "relevance") as SearchSort;
     if (!SORTS.includes(sort)) throw new HttpError(400, `sort must be one of ${SORTS.join(", ")}`);
-    return client.search({ query, index, sort, page: intParam(q.get("page"), 1, 1, 1000), limit: intParam(q.get("limit"), 20, 1, 50) });
+    const branch = q.get("branch") || undefined;
+    branchOf(branch);
+    return client.search({ query, index, sort, page: intParam(q.get("page"), 1, 1, 1000), limit: intParam(q.get("limit"), 20, 1, 50), ...(branch && { branch }) });
   }
   if (method === "GET" && (m = path.match(/^\/records\/([^/]+)$/))) return client.getRecord(recordIdOf(m[1]));
   if (method === "GET" && (m = path.match(/^\/records\/([^/]+)\/availability$/))) return client.getAvailability(recordIdOf(m[1]));
@@ -111,7 +127,13 @@ export async function handleApi(client: LibraryClient, method: string, url: URL,
   if (method === "GET" && (m = path.match(/^\/lists\/([^/]+)\/items$/))) {
     const sort = (q.get("sort") || "date.desc") as ListSort;
     if (!LIST_SORTS.includes(sort)) throw new HttpError(400, `sort must be one of ${LIST_SORTS.join(", ")}`);
-    return client.listItems(uuidOf(m[1], "list id"), { sort, page: intParam(q.get("page"), 1, 1, 1000), limit: intParam(q.get("limit"), 50, 1, 200) });
+    const availableAt = branchOf(q.get("availableAt") || undefined);
+    return client.listItems(uuidOf(m[1], "list id"), {
+      sort,
+      page: intParam(q.get("page"), 1, 1, 1000),
+      limit: intParam(q.get("limit"), 50, 1, 200),
+      ...(availableAt && { availableAt }),
+    });
   }
   if (route === "POST /lists/items") {
     // {formatGroupId, recordId?, title?, add: [listId], remove: [listId]}
@@ -163,16 +185,53 @@ function sendJson(res: ServerResponse, status: number, value: unknown): void {
   res.end(JSON.stringify(value));
 }
 
-export async function serveApi(client: LibraryClient, req: IncomingMessage, res: ServerResponse): Promise<void> {
+export interface WebApi {
+  // For catalogue calls and anyone not signed in. Has no card.
+  anonymous: LibraryClient;
+  sessions: Sessions;
+}
+
+function credentials(body: unknown): { cardNumber: string; pin: string } {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const cardNumber = typeof b.cardNumber === "string" ? b.cardNumber.replace(/\s+/g, "") : "";
+  const pin = typeof b.pin === "string" ? b.pin : "";
+  if (!/^[A-Za-z0-9]{4,32}$/.test(cardNumber)) throw new HttpError(400, "Enter your library card number.");
+  if (!pin || pin.length > 64) throw new HttpError(400, "Enter your PIN.");
+  return { cardNumber, pin };
+}
+
+export async function serveApi(web: WebApi, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const method = req.method ?? "GET";
   try {
     if (method !== "GET" && method !== "POST") throw new HttpError(405, `method ${method} not allowed`);
     const body = method === "POST" ? await readJson(req) : undefined;
-    sendJson(res, 200, await handleApi(client, method, new URL(req.url ?? "/", "http://x"), body));
+    const url = new URL(req.url ?? "/", "http://x");
+    const path = url.pathname.replace(/\/$/, "");
+    const sid = sessionId(req);
+
+    if (method === "POST" && path === "/api/login") {
+      const { cardNumber, pin } = credentials(body);
+      const id = await web.sessions.signIn(cardNumber, pin);
+      // A browser that was signed in to another card drops that session.
+      await web.sessions.signOut(sid);
+      res.setHeader("Set-Cookie", sessionCookie(req, id, web.sessions.maxAgeSeconds));
+      return sendJson(res, 200, { hasCredentials: true, card: maskCard(cardNumber) });
+    }
+    if (method === "POST" && path === "/api/logout") {
+      await web.sessions.signOut(sid);
+      res.setHeader("Set-Cookie", sessionCookie(req, "", 0));
+      return sendJson(res, 200, { hasCredentials: false });
+    }
+
+    const session = web.sessions.get(sid);
+    // A stale cookie (expired, or from before a restart) is cleared so the page asks again.
+    if (sid && !session) res.setHeader("Set-Cookie", sessionCookie(req, "", 0));
+    sendJson(res, 200, await handleApi(session?.client ?? web.anonymous, method, url, body, session?.card));
   } catch (e) {
     if (e instanceof HttpError) return sendJson(res, e.status, { error: e.message });
+    if (e instanceof TooManyAttempts) return sendJson(res, 429, { error: e.message });
     if (e instanceof VegaError) {
-      const status = e.code === "NoCredentials" ? 401 : e.code === "NotFound" ? 404 : e.code === "LoginFailed" ? 502 : 400;
+      const status = e.code === "NoCredentials" || e.code === "BadCredentials" ? 401 : e.code === "NotFound" ? 404 : e.code === "LoginFailed" ? 502 : 400;
       return sendJson(res, e.status && e.status >= 500 ? 502 : status, { error: e.message, code: e.code });
     }
     console.error(e);
@@ -190,11 +249,12 @@ const STATIC: Record<string, { file: string; type: string }> = {
   "/icon.svg": { file: "icon.svg", type: "image/svg+xml" },
 };
 
-// Open Library answers cover requests with a redirect to archive.org (then to an
-// iaNNNNNN.us.archive.org mirror), so those hosts have to be allowed too.
+// Covers come from Syndetics (the library's own cover service) and, as a fallback, Open
+// Library, which answers with a redirect to archive.org (then an iaNNNNNN.us.archive.org
+// mirror), so those hosts have to be allowed too.
 const SECURITY_HEADERS = {
   "Content-Security-Policy":
-    "default-src 'self'; img-src 'self' https://covers.openlibrary.org https://archive.org https://*.us.archive.org data:; style-src 'self' 'unsafe-inline'; script-src 'self'; " +
+    "default-src 'self'; img-src 'self' https://secure.syndetics.com https://covers.openlibrary.org https://archive.org https://*.us.archive.org data:; style-src 'self' 'unsafe-inline'; script-src 'self'; " +
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "no-referrer",

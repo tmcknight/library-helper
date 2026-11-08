@@ -5,6 +5,8 @@ import type { AddressInfo } from "node:net";
 import { handleApi, HttpError, serveApi, serveStatic } from "../src/web.ts";
 import type { LibraryClient } from "../src/web.ts";
 import { VegaError } from "../src/vega.ts";
+import { Sessions } from "../src/sessions.ts";
+import type { SessionClient } from "../src/sessions.ts";
 
 // Records each call so tests can check what the API passed through.
 function fakeClient(over: Partial<LibraryClient> = {}) {
@@ -43,11 +45,14 @@ test("search: passes validated params through with defaults", async () => {
   const { client, calls } = fakeClient();
   await handleApi(client, "GET", u("/api/search?q=hail+mary&index=title&sort=newest&page=2"), undefined);
   assert.deepEqual(calls, [["search", [{ query: "hail mary", index: "title", sort: "newest", page: 2, limit: 20 }]]]);
+  calls.length = 0;
+  await handleApi(client, "GET", u("/api/search?q=penny&branch=19"), undefined);
+  assert.deepEqual(calls, [["search", [{ query: "penny", index: "keyword", sort: "relevance", page: 1, limit: 20, branch: "19" }]]]);
 });
 
 test("search: rejects missing query and unknown index/sort/page", async () => {
   const { client } = fakeClient();
-  for (const path of ["/api/search", "/api/search?q=x&index=isbn", "/api/search?q=x&sort=random", "/api/search?q=x&page=0", "/api/search?q=x&limit=500"]) {
+  for (const path of ["/api/search", "/api/search?q=x&index=isbn", "/api/search?q=x&sort=random", "/api/search?q=x&page=0", "/api/search?q=x&limit=500", "/api/search?q=x&branch=999"]) {
     await assert.rejects(handleApi(client, "GET", u(path), undefined), (e) => e instanceof HttpError && e.status === 400, path);
   }
 });
@@ -81,11 +86,24 @@ test("unknown routes and wrong methods are 404", async () => {
   await assert.rejects(handleApi(client, "GET", u("/api/holds/cancel"), undefined), (e) => e instanceof HttpError && e.status === 404);
 });
 
-async function withServer(client: LibraryClient, fn: (base: string) => Promise<void>) {
+// Signed-in browsers get `client` (as a session client); the anonymous client has no card.
+function fakeSessions(client: LibraryClient, log: string[] = [], goodPin = "1234") {
+  return new Sessions((card, pin) => ({
+    ...client,
+    signIn: async () => {
+      if (pin !== goodPin) throw new VegaError("BadCredentials", "Invalid username or password.");
+      log.push(`in ${card}`);
+    },
+    signOut: async () => void log.push(`out ${card}`),
+  }) as SessionClient);
+}
+
+async function withServer(client: LibraryClient, fn: (base: string) => Promise<void>, sessions = fakeSessions(client)) {
+  const anonymous = { ...client, hasCredentials: false } as LibraryClient;
   const server = createServer(async (req, res) => {
     const path = new URL(req.url ?? "/", "http://x").pathname;
     if (req.method === "GET" && (await serveStatic(path, res))) return;
-    await serveApi(client, req, res);
+    await serveApi({ anonymous, sessions }, req, res);
   });
   await new Promise<void>((r) => server.listen(0, r));
   try {
@@ -151,12 +169,14 @@ test("lists: reads pass validated ids and sort through", async () => {
   await handleApi(client, "GET", u("/api/lists"), undefined);
   await handleApi(client, "GET", u(`/api/lists/${L1}/items?sort=title.asc&page=2`), undefined);
   await handleApi(client, "GET", u(`/api/lists/containing?id=${FG}`), undefined);
+  await handleApi(client, "GET", u(`/api/lists/${L1}/items?availableAt=19`), undefined);
   assert.deepEqual(calls, [
     ["lists", []],
     ["listItems", [L1, { sort: "title.asc", page: 2, limit: 50 }]],
     ["listsContaining", [FG]],
+    ["listItems", [L1, { sort: "date.desc", page: 1, limit: 50, availableAt: "19" }]],
   ]);
-  for (const path of ["/api/lists/not-a-uuid/items", `/api/lists/${L1}/items?sort=random`, "/api/lists/containing", "/api/lists/containing?id=1"]) {
+  for (const path of ["/api/lists/not-a-uuid/items", `/api/lists/${L1}/items?sort=random`, `/api/lists/${L1}/items?availableAt=99`, "/api/lists/containing", "/api/lists/containing?id=1"]) {
     await assert.rejects(handleApi(client, "GET", u(path), undefined), (e) => e instanceof HttpError && e.status === 400, path);
   }
 });
@@ -177,4 +197,86 @@ test("lists: add/remove validates the body", async () => {
   for (const body of bad) {
     await assert.rejects(handleApi(client, "POST", u("/api/lists/items"), body), (e) => e instanceof HttpError && e.status === 400, JSON.stringify(body));
   }
+});
+
+const post = (base: string, path: string, body: unknown, headers: Record<string, string> = {}) =>
+  fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+
+test("http: sign in sets an HttpOnly session cookie; sign out ends it", async () => {
+  const { client } = fakeClient();
+  const log: string[] = [];
+  await withServer(client, async (base) => {
+    assert.equal((await (await fetch(`${base}/api/config`)).json()).hasCredentials, false);
+
+    const bad = await post(base, "/api/login", { cardNumber: "29999000123456", pin: "0000" });
+    assert.equal(bad.status, 401);
+    assert.deepEqual(await bad.json(), { error: "Invalid username or password.", code: "BadCredentials" });
+    assert.equal(bad.headers.get("set-cookie"), null);
+
+    const ok = await post(base, "/api/login", { cardNumber: "2999 9000 123456", pin: "1234" });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { hasCredentials: true, card: "•••• 3456" });
+    const set = ok.headers.get("set-cookie")!;
+    assert.match(set, /^lh_session=[\w-]{43}; Path=\/api; HttpOnly; SameSite=Strict; Max-Age=\d+$/);
+    const cookie = set.split(";")[0];
+
+    const cfg = await (await fetch(`${base}/api/config`, { headers: { Cookie: cookie } })).json();
+    assert.equal(cfg.hasCredentials, true);
+    assert.equal(cfg.card, "•••• 3456");
+
+    const out = await post(base, "/api/logout", {}, { Cookie: cookie });
+    assert.match(out.headers.get("set-cookie")!, /^lh_session=; .*Max-Age=0/);
+    // The old cookie no longer signs anyone in, and is cleared.
+    const after = await fetch(`${base}/api/config`, { headers: { Cookie: cookie } });
+    assert.equal((await after.json()).hasCredentials, false);
+    assert.match(after.headers.get("set-cookie")!, /Max-Age=0/);
+  }, fakeSessions(client, log));
+  assert.deepEqual(log, ["in 29999000123456", "out 29999000123456"]);
+});
+
+test("http: cookie is Secure behind an HTTPS proxy; signing in again drops the old session", async () => {
+  const { client } = fakeClient();
+  const log: string[] = [];
+  await withServer(client, async (base) => {
+    const first = await post(base, "/api/login", { cardNumber: "11112222", pin: "1234" }, { "X-Forwarded-Proto": "https" });
+    assert.match(first.headers.get("set-cookie")!, /; Secure$/);
+    const cookie = first.headers.get("set-cookie")!.split(";")[0];
+    await post(base, "/api/login", { cardNumber: "33334444", pin: "1234" }, { Cookie: cookie });
+    assert.equal((await (await fetch(`${base}/api/config`, { headers: { Cookie: cookie } })).json()).hasCredentials, false);
+  }, fakeSessions(client, log));
+  assert.deepEqual(log, ["in 11112222", "in 33334444", "out 11112222"]);
+});
+
+test("http: sign-in validates input and throttles failures", async () => {
+  const { client } = fakeClient();
+  const sessions = new Sessions(() => ({ ...client, signIn: async () => { throw new VegaError("BadCredentials", "no"); }, signOut: async () => {} }) as SessionClient, { failuresPerMinute: 2 });
+  await withServer(client, async (base) => {
+    for (const body of [{}, { cardNumber: "12", pin: "1" }, { cardNumber: "12345678" }, { cardNumber: "1234<script>", pin: "1" }]) {
+      assert.equal((await post(base, "/api/login", body)).status, 400, JSON.stringify(body));
+    }
+    assert.equal((await post(base, "/api/login", { cardNumber: "12345678", pin: "1" })).status, 401);
+    assert.equal((await post(base, "/api/login", { cardNumber: "12345678", pin: "1" })).status, 401);
+    assert.equal((await post(base, "/api/login", { cardNumber: "12345678", pin: "1" })).status, 429);
+  }, sessions);
+});
+
+test("sessions: expire when idle and cap how many are kept", async () => {
+  let now = 0;
+  const out: string[] = [];
+  const make = (card: string) => ({ signIn: async () => {}, signOut: async () => void out.push(card) }) as unknown as SessionClient;
+  const s = new Sessions(make, { idleMs: 1000, max: 2, now: () => now });
+  const a = await s.signIn("a", "p");
+  now = 500;
+  assert.ok(s.get(a));
+  now = 1400; // 900ms after last use
+  assert.ok(s.get(a));
+  now = 2500;
+  assert.equal(s.get(a), undefined);
+  const b = await s.signIn("b", "p");
+  now = 2600;
+  await s.signIn("c", "p");
+  now = 2700;
+  await s.signIn("d", "p");
+  assert.equal(s.get(b), undefined);
+  assert.deepEqual(out, ["a", "b"]);
 });

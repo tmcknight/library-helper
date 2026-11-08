@@ -9,7 +9,7 @@ MCP server for the [Lambton County Library](https://lcl.ca.iiivega.com/portal) c
 
 | Tool | Needs card | What it does |
 |---|---|---|
-| `search_catalogue` | | Keyword (incl. ISBN/UPC)/title/author/subject/series/call-number search, paged and sortable |
+| `search_catalogue` | | Keyword (incl. ISBN/UPC)/title/author/subject/series/call-number search, paged and sortable; `branch` limits it to titles with a copy at one branch |
 | `get_record` | | Full bibliographic record, per-branch summary, other formats |
 | `get_availability` | | Every copy: branch, call number, status, due date |
 | `list_branches` | | Branch and pickup location codes |
@@ -19,7 +19,7 @@ MCP server for the [Lambton County Library](https://lcl.ca.iiivega.com/portal) c
 | `list_holds` / `place_hold` / `cancel_holds` | ✓ | Holds |
 | `list_fines` | ✓ | Outstanding fees (dollars) |
 | `loan_history` | ✓ | Past loans, if reading history is turned on for the card |
-| `list_reading_lists` / `add_to_list` / `remove_from_list` | ✓ | Saved reading lists (For Later and your own): show, add and remove titles |
+| `list_reading_lists` / `add_to_list` / `remove_from_list` | ✓ | Saved reading lists (For Later and your own): show, add and remove titles; `availableAt` shows only what's on the shelf at one branch |
 
 ## Setup
 
@@ -98,13 +98,15 @@ Other searches: set `index` to `author`, `subject`, `series` or `call_number`, `
 In HTTP mode the server also serves a web app at `/`: catalogue search with per-format availability, record pages with every copy and a "Place hold" button, your loans (renew one or several), holds (cancel), fines, reading history and saved reading lists (add from search results or a record page, remove from the list), and every branch's hours with an open-now indicator. It follows the system light/dark setting and works on a phone.
 
 ```sh
-MCP_TRANSPORT=http AUTH_MODE=none LIBRARY_CARD_NUMBER=<card> LIBRARY_PIN=<pin> node src/index.ts
-# open http://localhost:3000/
+MCP_TRANSPORT=http AUTH_MODE=none node src/index.ts
+# open http://localhost:3000/ and sign in with your card and PIN
 ```
+
+- **Sign in / out.** The web UI doesn't use `LIBRARY_CARD_NUMBER` / `LIBRARY_PIN` (those are for MCP). Each browser signs in with its own card and PIN on the Account page (or any page that needs a card) and gets its own library session; **Sign out** on the Account page ends it, including the library's own login session. The PIN is only sent to the library and isn't kept; the session is a random id in an `HttpOnly`, `SameSite=Strict` cookie (`Secure` when served over HTTPS, including behind a tunnel). Sessions live in memory: a restart, or 30 days unused, signs you out. After 10 failed sign-ins in a minute the server answers `429` for the rest of that minute.
 
 - The page itself holds no data and is served to anyone; everything it shows comes from `/api/*`, which passes the same `AUTH_MODE` check as `/mcp`. Behind Cloudflare Access or another login proxy, protect the whole hostname and the browser's session covers both. With `bearer`, the page asks for the token once and keeps it in that browser's local storage.
 - `/api` only accepts JSON `POST`s, so another site can't submit a form that renews or cancels on your card through your login cookie.
-- Covers (search results and record pages) come from Open Library by ISBN when it has one; otherwise the page draws a plain title card. Open Library serves its images by redirecting to `archive.org`, so the page's Content-Security-Policy allows images from `covers.openlibrary.org`, `archive.org` and `*.us.archive.org` (and nothing else off-site).
+- Covers come from the library's own cover service (Syndetics: Vega sends a link with every title, loan and hold), then Open Library by ISBN; otherwise the page draws a plain title card. The page's Content-Security-Policy allows images from `secure.syndetics.com`, `covers.openlibrary.org`, and `archive.org` / `*.us.archive.org` (where Open Library redirects), and nothing else off-site. MCP tool output leaves cover links out.
 - Set `WEB_UI=0` to turn it off and serve only `/mcp`.
 
 The UI is plain HTML, CSS and JavaScript in `web/`, with no build step. `src/web.ts` holds its JSON API.

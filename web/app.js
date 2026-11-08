@@ -1,6 +1,7 @@
 // Library Helper web UI. No build step: plain ES modules talking to /api.
 
 const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const app = $("#app");
 
 // ---- Utilities ---------------------------------------------------------------
@@ -21,7 +22,9 @@ function html(strings, ...values) {
   });
   return new Safe(out);
 }
+const raw = (s) => new Safe(s);
 const render = (s) => { app.innerHTML = String(s); };
+const fill = (el, s) => { if (el) el.innerHTML = String(s); };
 
 const store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -31,28 +34,38 @@ const store = {
 const DAY = 86_400_000;
 const dateFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
 const shortFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric" });
-const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" });
-// "Nov 8", with the year only when it isn't this year.
 const dayFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const longFmt = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" });
+const money = new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" });
+// A bare "2027-05-01" parses as UTC midnight, which is the day before in Ontario; read it as local.
+const toDate = (s) => new Date(/^\d{4}-\d{2}-\d{2}$/.test(s ?? "") ? `${s}T00:00` : s);
+const valid = (d) => !Number.isNaN(d.getTime());
+// "Nov 8", with the year only when it isn't this year.
 const fmtDay = (s) => {
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return s ?? "";
+  const d = toDate(s);
+  if (!valid(d)) return s ?? "";
   return d.getFullYear() === new Date().getFullYear() ? dayFmt.format(d) : dateFmt.format(d);
 };
-const fmtDate = (s) => (s && !Number.isNaN(Date.parse(s)) ? dateFmt.format(new Date(s)) : s ?? "");
+const fmtDate = (s) => (s && valid(toDate(s)) ? dateFmt.format(toDate(s)) : s ?? "");
 // Vega spells e-formats "Ebook" and "Eaudiobook".
 const formatName = (f) => (f ?? "").replace(/^E(book|audiobook)$/i, (_, w) => `e${w[0].toUpperCase()}${w.slice(1).toLowerCase()}`);
+const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");
 const plural = (n, w) => `${n} ${n === 1 ? w : /(s|sh|ch|x)$/.test(w) ? `${w}es` : `${w}s`}`;
+const listJoin = (xs) => new Intl.ListFormat("en", { type: "conjunction" }).format(xs);
 
 // Whole calendar days from today to the due date, in local time. Libby loans are due at a
 // time of day, so counting elapsed hours would call "tomorrow night" two days away.
-function relDue(iso) {
+function daysUntil(iso) {
   const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((midnight(new Date(iso)) - midnight(new Date())) / DAY);
-  if (days < 0) return { text: `Overdue by ${plural(-days, "day")}`, tone: "bad" };
+  return Math.round((midnight(toDate(iso)) - midnight(new Date())) / DAY);
+}
+function relDue(iso) {
+  const days = daysUntil(iso);
+  if (days < 0) return { text: `${plural(-days, "day")} overdue`, tone: "bad" };
   if (days === 0) return { text: "Due today", tone: "bad" };
-  if (days <= 3) return { text: `Due in ${plural(days, "day")}`, tone: "warn" };
-  return { text: `Due ${shortFmt.format(new Date(iso))}`, tone: "" };
+  if (days === 1) return { text: "Due tomorrow", tone: "warn" };
+  if (days <= 3) return { text: `Due in ${days} days`, tone: "warn" };
+  return { text: `Due ${shortFmt.format(toDate(iso))}`, tone: "" };
 }
 
 // "Weir, Andy." -> "Andy Weir"
@@ -69,29 +82,60 @@ function languageName(code) {
   try { return languageNames.of(code); } catch { return code; }
 }
 const cleanTitle = (t) => (t ?? "").replace(/\s*[/:]\s*$/, "").replace(/\s+:\s+/, ": ");
+const shortBranch = (n) => (n ?? "").replace(/ (Branch )?Library$/, "");
 
+const svg = (cls, d) => `<svg class="${cls}" aria-hidden="true" viewBox="0 0 24 24">${d}</svg>`;
 const icon = {
-  search: '<svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
-  back: '<svg class="i" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>',
-  bookmark: '<svg class="i" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg>',
-  refresh: '<svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
-  pin: '<svg class="i" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
-  phone: '<svg class="i" viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>',
+  search: svg("i", '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
+  back: svg("i", '<path d="m15 18-6-6 6-6"/>'),
+  next: svg("i", '<path d="m9 18 6-6-6-6"/>'),
+  go: svg("i go", '<path d="m9 18 6-6-6-6"/>'),
+  chev: svg("i chev", '<path d="m6 9 6 6 6-6"/>'),
+  bookmark: svg("i", '<path d="M7 3.5h10a1 1 0 0 1 1 1V21l-6-4-6 4V4.5a1 1 0 0 1 1-1z"/>'),
+  refresh: svg("i", '<path d="M20 12a8 8 0 1 1-2.6-5.9L20 8.5"/><path d="M20 3.5v5h-5"/>'),
+  pin: svg("i", '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>'),
+  phone: svg("i", '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>'),
+  link: svg("i", '<path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),
+  check: svg("i", '<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
+  clock: svg("i", '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
+  alert: svg("i", '<path d="M12 8v5"/><path d="M12 16.5v.01"/><circle cx="12" cy="12" r="8.5"/>'),
+  user: svg("i", '<circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>'),
 };
-const raw = (s) => new Safe(s);
 
-// Generated cover: a colour from the title, with title and author set in type.
-const PALETTE = ["#0f766e", "#1d4ed8", "#7c3aed", "#be185d", "#b45309", "#15803d", "#334155", "#9f1239", "#0e7490", "#4d7c0f"];
+// Covers, best first: the library's own (Syndetics, the `cover` the API sends), then Open
+// Library by ISBN, then a generated one: a colour from the title, with title and author set
+// in type. The generated cover is always underneath, so a missing image just reveals it.
+const PALETTE = ["#0f6b5f", "#1e4fa8", "#6d3fc4", "#a8285e", "#a65a12", "#1f7a43", "#3a4656", "#8c1d3a", "#0e6a82", "#557017"];
 function hash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); }
-function cover(title, author, { large = false, isbn } = {}) {
+const openLibrary = (isbn, large) => `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-${large ? "L" : "M"}.jpg?default=false`;
+function cover(title, author, { size = "", isbn, src } = {}) {
   const h = hash(title ?? "");
   const a = PALETTE[h % PALETTE.length], b = PALETTE[(h >> 4) % PALETTE.length];
-  const img = isbn ? html`<img alt="" loading="lazy" src="https://covers.openlibrary.org/b/isbn/${isbn}-${large ? "L" : "M"}.jpg?default=false" data-cover>` : "";
-  return html`<div class="cover${large ? " lg" : ""}" style="background:linear-gradient(150deg, ${a}, ${b})">
+  const large = size === "lg";
+  const first = src ? (large ? src.replace("mc.gif", "lc.gif") : src) : isbn ? openLibrary(isbn, large) : "";
+  const fallback = src && isbn ? openLibrary(isbn, large) : "";
+  const img = first ? html`<img alt="" loading="lazy" src="${first}" data-cover data-fallback="${fallback}">` : "";
+  return html`<div class="cover ${size}" style="background:linear-gradient(155deg, ${a}, ${b})">
     <span class="t">${cleanTitle(title)}</span><span class="a">${prettyName(author)}</span>${img}</div>`;
 }
-// Hide Open Library covers that don't exist (it 404s with default=false).
-document.addEventListener("error", (e) => { if (e.target.matches?.("img[data-cover]")) e.target.remove(); }, true);
+// Syndetics never 404s: a missing cover is its grey placeholder (143×200, or 286×400 large)
+// or a 1×1 pixel. Open Library 404s (default=false). Either way, try the next source.
+function coverMissed(img) {
+  if (img.dataset.fallback) {
+    img.src = img.dataset.fallback;
+    img.dataset.fallback = "";
+  } else {
+    img.remove();
+  }
+}
+document.addEventListener("load", (e) => {
+  const img = e.target;
+  if (!img.matches?.("img[data-cover]")) return;
+  const w = img.naturalWidth, h = img.naturalHeight;
+  if (w <= 1 || (w === 143 && h === 200) || (w === 286 && h === 400)) coverMissed(img);
+  else img.classList.add("loaded");
+}, true);
+document.addEventListener("error", (e) => { if (e.target.matches?.("img[data-cover]")) coverMissed(e.target); }, true);
 
 function toast(msg, tone = "") {
   const t = document.createElement("div");
@@ -118,13 +162,78 @@ async function api(path, { method = "GET", body } = {}) {
     throw new ApiError(403, "The server refused this request. Check that you're signed in to it.");
   }
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, json.error ?? `HTTP ${res.status}`, json.code);
+  if (!res.ok) {
+    // Signed out underneath us (session expired, server restarted, PIN changed): forget the
+    // cached config so the page shows the sign-in form again.
+    if (res.status === 401 && path !== "/login") signedOut();
+    throw new ApiError(res.status, json.error ?? `HTTP ${res.status}`, json.code);
+  }
   return json;
 }
 
 // Cache the promise, not the result, so pages that ask at the same time share one request.
 let config;
 const getConfig = () => (config ??= api("/config").catch((e) => { config = undefined; throw e; }));
+
+function signedOut() {
+  const wasIn = config;
+  config = undefined;
+  updateBadge({});
+  if (wasIn) wasIn.then((c) => { if (c.hasCredentials) setTimeout(route); }).catch(() => {});
+}
+
+async function signIn(form) {
+  const btn = $("button[type=submit]", form);
+  const err = $(".form-error", form);
+  btn.disabled = true;
+  err.hidden = true;
+  try {
+    await api("/login", { method: "POST", body: { cardNumber: form.card.value, pin: form.pin.value } });
+    config = undefined;
+    toast("Signed in.");
+    refreshBadge();
+    await route();
+  } catch (e) {
+    err.textContent = e.message;
+    err.hidden = false;
+    btn.disabled = false;
+    form.pin.select();
+  }
+}
+
+async function signOut() {
+  try {
+    await api("/logout", { method: "POST", body: {} });
+  } catch (e) {
+    toast(e.message, "bad");
+    return;
+  }
+  config = undefined;
+  updateBadge({});
+  toast("Signed out.");
+  location.hash = "#/";
+  route();
+}
+
+function signInPanel(intro = "Sign in to see your loans, holds, lists and fines.") {
+  return html`<div class="panel signin">
+    <h2>Sign in</h2>
+    <p class="sub">${intro}</p>
+    <form id="signin" autocomplete="on">
+      <div class="field"><label for="card">Library card number</label>
+        <input id="card" class="input" name="card" inputmode="numeric" autocomplete="username" required autofocus></div>
+      <div class="field"><label for="pin">PIN</label>
+        <input id="pin" class="input" name="pin" type="password" autocomplete="current-password" required></div>
+      <p class="form-error" role="alert" hidden></p>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+    <p class="muted small">Your card and PIN go to the library to sign in and aren't stored. You stay signed in on this browser until you sign out.</p>
+  </div>`;
+}
+function wireSignIn() {
+  const form = $("#signin");
+  form?.addEventListener("submit", (e) => { e.preventDefault(); signIn(form); });
+}
 
 // The account summary costs several library calls; callers that overlap (the nav badge and
 // the account page on first load) share one request.
@@ -134,8 +243,8 @@ const getAccount = () => (accountInFlight ??= api("/account").finally(() => { ac
 // Bearer-token deployments: ask once, remember in this browser.
 function askToken() {
   const dlg = $("#dialog");
-  dlg.innerHTML = String(html`<form method="dialog">
-    <div><h2>Access token</h2><p class="muted small" style="margin-top:6px">This server wants a bearer token (its AUTH_TOKEN). It is stored in this browser only.</p></div>
+  fill(dlg, html`<form method="dialog">
+    <div><h2>Access token</h2><p class="sub">This server wants a bearer token (its AUTH_TOKEN). It's stored in this browser only.</p></div>
     <div class="field"><label for="tok">Token</label><input id="tok" class="input" name="token" type="password" autocomplete="off" required></div>
     <div class="actions"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="ok">Save</button></div>
   </form>`);
@@ -151,221 +260,320 @@ function askToken() {
 
 // ---- Shared views ---------------------------------------------------------------
 
-const loading = (n = 3) => html`<div class="grid">${Array.from({ length: n }, () => html`<div class="skeleton" style="height:92px"></div>`)}</div>`;
+const skeleton = (n = 3, h = 76) => html`<div style="display:grid;gap:10px">${Array.from({ length: n }, () => html`<div class="skeleton" style="height:${h}px"></div>`)}</div>`;
 const errorBox = (e) => html`<div class="error-box">${e.message}</div>`;
-
-function noCard() {
-  return html`<div class="card empty">
-    <h2>No library card configured</h2>
-    <p>Set <code>LIBRARY_CARD_NUMBER</code> and <code>LIBRARY_PIN</code> on the server to see loans, holds and fines.</p>
-  </div>`;
-}
+const emptyState = (title, body, cta) => html`<div class="panel empty"><h2>${title}</h2>${body ? html`<p>${body}</p>` : ""}${cta ?? ""}</div>`;
+const searchCta = html`<a class="btn primary" href="#/search">Search the catalogue</a>`;
 
 const INDEXES = [["keyword", "Everything"], ["title", "Title"], ["author", "Author"], ["subject", "Subject"], ["series", "Series"], ["call_number", "Call number"]];
 const SORTS = [["relevance", "Most relevant"], ["newest", "Newest"], ["title", "Title A–Z"], ["author", "Author A–Z"]];
 const options = (list, cur) => list.map(([v, l]) => html`<option value="${v}"${raw(v === cur ? " selected" : "")}>${l}</option>`);
 
+// The branch filter is remembered in this browser, so every search (from the box, an author
+// link, a subject tag) keeps to "my branch" until it's changed back to all branches.
+const savedBranch = () => store.get("branch", "");
 function searchHref(q, index = "keyword", extra = {}) {
-  const p = new URLSearchParams({ q, ...(index !== "keyword" && { index }), ...extra });
+  const { branch = savedBranch(), ...rest } = extra;
+  const p = new URLSearchParams({ q, ...(index !== "keyword" && { index }), ...(branch && { branch }), ...rest });
   return `#/search?${p}`;
 }
 
-// ---- Pages -----------------------------------------------------------------------
+// The big search box with field chips under it, used on the home and search pages.
+function searchForm(id, { q = "", index = "keyword", branch = savedBranch(), autofocus = false } = {}) {
+  return html`<form id="${id}" role="search" autocomplete="off">
+    <div class="searchbox">
+      ${raw(icon.search)}
+      <input name="q" type="search" value="${q}" placeholder="Title, author, subject or ISBN" aria-label="Search the catalogue" ${raw(autofocus ? "autofocus" : "")}>
+      <button class="btn primary" aria-label="Search">${raw(icon.search)}<span class="btn-label">Search</span></button>
+    </div>
+    <input type="hidden" name="index" value="${index}">
+    <div class="filters">
+      <div class="chips" role="group" aria-label="Search in">${INDEXES.map(([v, l]) => html`<button type="button" class="chip" data-index="${v}" aria-pressed="${String(v === index)}">${l}</button>`)}</div>
+      <label class="branch-filter${branch ? " on" : ""}">${raw(icon.pin)}<span class="sr-only">Branch</span>
+        <select name="branch" class="select bare" data-branch="${branch}"><option value="">All branches</option></select>
+      </label>
+    </div>
+  </form>`;
+}
+function wireSearchForm(form, extra = () => ({})) {
+  const go = () => {
+    const q = form.q.value.trim();
+    // Until the branch list arrives the select is empty; keep the branch the form started with.
+    const branch = form.branch.options.length > 1 ? form.branch.value : form.branch.dataset.branch;
+    if (q) location.hash = searchHref(q, form.index.value, { ...extra(), branch });
+    else form.q.focus();
+  };
+  const sel = form.branch;
+  getConfig().then((cfg) => {
+    sel.insertAdjacentHTML("beforeend", String(html`${cfg.branches.map((b) => html`<option value="${b.code}"${raw(b.code === sel.dataset.branch ? " selected" : "")}>${shortBranch(b.name)}</option>`)}`));
+  }).catch(() => {});
+  sel.addEventListener("change", () => {
+    store.set("branch", sel.value);
+    sel.parentElement.classList.toggle("on", Boolean(sel.value));
+    if (form.q.value.trim()) go();
+  });
+  form.addEventListener("submit", (e) => { e.preventDefault(); go(); });
+  $$("[data-index]", form).forEach((b) => b.addEventListener("click", () => {
+    form.index.value = b.dataset.index;
+    $$("[data-index]", form).forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    go();
+  }));
+}
+
+function pager(page, totalPages, href) {
+  if (totalPages <= 1) return "";
+  return html`<nav class="pager" aria-label="Pages">
+    ${page > 1 ? html`<a class="btn" href="${href(page - 1)}">${raw(icon.back)} Previous</a>` : html`<span></span>`}
+    <span class="muted small">Page ${page} of ${totalPages}</span>
+    ${page < totalPages ? html`<a class="btn" href="${href(page + 1)}">Next ${raw(icon.next)}</a>` : html`<span></span>`}
+  </nav>`;
+}
+
+// ---- Home -----------------------------------------------------------------------
 
 async function homePage() {
   render(html`
     <section class="hero">
-      <h1>Find your next read</h1>
-      <p>Search the Lambton County Library catalogue, check availability and manage your card.</p>
-      <form class="bigsearch" id="bigsearch" role="search">
-        <input class="input" name="q" type="search" placeholder="Title, author, subject or ISBN" aria-label="Search" autofocus>
-        <select class="select" name="index" aria-label="Search in">${options(INDEXES, "keyword")}</select>
-        <button class="btn primary">${raw(icon.search)} Search</button>
-      </form>
+      <p class="eyebrow">${longFmt.format(new Date())}</p>
+      <h1 style="margin-top:10px">Find your next read</h1>
+      <p>Search the Lambton County Library catalogue, see what's on the shelf and keep track of your books.</p>
+      <div class="bigsearch">${searchForm("bigsearch", { autofocus: !matchMedia("(pointer: coarse)").matches })}</div>
     </section>
-    <div id="glance"></div>
+    <div id="mine"></div>
     <div id="open-now"></div>`);
-  $("#bigsearch").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const f = new FormData(e.target);
-    if (f.get("q").trim()) location.hash = searchHref(f.get("q").trim(), f.get("index"));
-  });
+  wireSearchForm($("#bigsearch"));
 
-  const cfg = await getConfig().catch(() => null);
-  if (cfg?.hasCredentials) {
-    $("#glance").innerHTML = String(html`<div class="section-head"><h2>Your card</h2><a href="#/account">View account</a></div>${loading(1)}`);
-    try {
-      const s = await getAccount();
-      $("#glance").innerHTML = String(html`<div class="section-head"><h2>Your card</h2><a href="#/account">View account →</a></div>${statTiles(s)}`);
-    } catch (e) {
-      $("#glance").innerHTML = String(html`<div class="section-head"><h2>Your card</h2></div>${errorBox(e)}`);
-    }
-  }
+  const [cfg, hours] = await Promise.all([getConfig().catch(() => null), api("/hours").catch(() => null)]);
+  if (hours) fill($("#open-now"), openNow(hours));
+  if (cfg?.hasCredentials) await myBooksAtAGlance($("#mine"));
+  else if (cfg) fill($("#mine"), html`<section class="section"><a class="callout info" href="#/account">
+    <span class="ic">${raw(icon.user)}</span><span class="body"><strong>Sign in with your library card</strong><span class="muted small">See what's due, your holds and your lists.</span></span>${raw(icon.go)}</a></section>`);
+}
+
+async function myBooksAtAGlance(el) {
+  fill(el, html`<section class="section">${skeleton(2, 64)}</section>`);
+  let loans, holds;
   try {
-    const h = await api("/hours");
-    const open = h.branches.filter((b) => openState(b, h.today).open);
-    $("#open-now").innerHTML = String(html`<div class="section-head"><h2>Open now</h2><a href="#/hours">All hours →</a></div>
-      ${open.length
-        ? html`<div class="tags">${open.map((b) => html`<a href="#/hours?b=${encodeURIComponent(b.name)}">${b.name.replace(/ Library$/, "")} · until ${openState(b, h.today).until}</a>`)}</div>`
-        : html`<p class="muted">No branches are open right now.</p>`}`);
-  } catch {}
+    [loans, holds] = await Promise.all([api("/loans"), api("/holds")]);
+  } catch (e) {
+    fill(el, html`<section class="section">${errorBox(e)}</section>`);
+    return;
+  }
+  loans.sort((a, b) => toDate(a.dueDate) - toDate(b.dueDate));
+  const ready = holds.filter((h) => h.readyForPickup);
+  const overdue = loans.filter((l) => daysUntil(l.dueDate) < 0);
+  const dueSoon = loans.filter((l) => { const d = daysUntil(l.dueDate); return d >= 0 && d <= 3; });
+
+  const callout = (tone, ic, title, sub, href) => html`<a class="callout ${tone}" href="${href}">
+    <span class="ic">${raw(ic)}</span><span class="body"><strong>${title}</strong><span class="muted small">${sub}</span></span>${raw(icon.go)}</a>`;
+  const where = [...new Set(ready.map((h) => shortBranch(h.pickupLocation?.name)).filter(Boolean))].join(", ");
+  const callouts = [
+    ready.length && callout("ok", icon.check,
+      ready.length === 1 ? `“${cleanTitle(ready[0].title)}” is ready for pickup` : `${ready.length} holds are ready for pickup`,
+      [where, ready.length === 1 && ready[0].expires && `pick up by ${fmtDay(ready[0].expires)}`].filter(Boolean).join(" · "),
+      "#/borrowed/holds"),
+    overdue.length && callout("bad", icon.alert,
+      overdue.length === 1 ? `“${cleanTitle(overdue[0].title)}” is overdue` : `${overdue.length} items are overdue`,
+      "Renew or return it to stop fines adding up", "#/borrowed/loans"),
+    dueSoon.length && callout("warn", icon.clock,
+      dueSoon.length === 1 ? `“${cleanTitle(dueSoon[0].title)}” is ${relDue(dueSoon[0].dueDate).text.toLowerCase()}` : `${dueSoon.length} items are due in the next 3 days`,
+      dueSoon.some((l) => l.canRenew) ? "You can renew it from Borrowed" : "Return it to any branch", "#/borrowed/loans"),
+  ].filter(Boolean);
+
+  fill(el, html`<div class="fade-in">
+    ${callouts.length ? html`<section class="section callouts">${callouts}</section>` : ""}
+    <section class="section">
+      <div class="section-head"><h2>On your shelf</h2><a href="#/borrowed">Borrowed →</a></div>
+      ${loans.length
+        ? html`<div class="shelf">${loans.map((l) => {
+            const due = relDue(l.dueDate);
+            return html`<a href="#/borrowed/loans" title="${cleanTitle(l.title)}">${cover(l.title, undefined, { src: l.cover })}<div class="title">${cleanTitle(l.title)}</div><span class="tag ${due.tone}">${due.text}</span></a>`;
+          })}</div>`
+        : html`<p class="muted">Nothing checked out right now${holds.length ? html` · <a href="#/borrowed/holds">${plural(holds.length, "hold")} on the way</a>` : ""}.</p>`}
+    </section>
+  </div>`);
 }
 
-function statTiles(s) {
-  const tile = (label, value, href, tone = "") => html`<a class="card stat ${tone}" href="${href}"><div class="label">${label}</div><div class="value">${value}</div></a>`;
-  return html`<div class="grid stats">
-    ${tile("Checked out", s.loans, "#/account/loans")}
-    ${tile("Overdue", s.overdue, "#/account/loans", s.overdue ? "alert" : "")}
-    ${tile("Due in 3 days", s.dueWithin3Days, "#/account/loans")}
-    ${tile("Holds", s.holds, "#/account/holds")}
-    ${tile("Ready for pickup", s.holdsReadyForPickup, "#/account/holds", s.holdsReadyForPickup ? "good" : "")}
-    ${tile("Owed", money.format(s.moneyOwed ?? 0), "#/account/fines", s.moneyOwed > 0 ? "alert" : "")}
-  </div>`;
+function openNow(h) {
+  const open = h.branches.map((b) => ({ b, st: openState(b, h.today) })).filter((x) => x.st.open);
+  return html`<section class="section fade-in">
+    <div class="section-head"><h2>Open now</h2><a href="#/hours">All branches →</a></div>
+    ${open.length
+      ? html`<div class="branch-mini">${open.map(({ b, st }) => html`<a href="#/hours?b=${encodeURIComponent(shortBranch(b.name))}">${shortBranch(b.name)}<span class="until">until ${fmtTime(st.until)}</span></a>`)}</div>`
+      : html`<p class="muted">Every branch is closed right now.</p>`}
+  </section>`;
 }
+
+// ---- Search ---------------------------------------------------------------------
+
+const EXAMPLES = [["Louise Penny", "author"], ["Gardening", "subject"], ["Large print mysteries", "keyword"], ["Canadian history", "subject"], ["Graphic novels", "keyword"]];
 
 async function searchPage(params) {
   const q = params.get("q") ?? "";
   const index = params.get("index") ?? "keyword";
   const sort = params.get("sort") ?? "relevance";
+  const branch = params.get("branch") ?? "";
   const page = Number(params.get("page") ?? 1);
   render(html`
-    <form class="search-bar" id="searchform" role="search">
-      <input class="input" name="q" type="search" value="${q}" placeholder="Title, author, subject or ISBN" aria-label="Search" ${raw(q ? "" : "autofocus")}>
-      <select class="select" name="index" aria-label="Search in">${options(INDEXES, index)}</select>
-      <select class="select" name="sort" aria-label="Sort">${options(SORTS, sort)}</select>
-      <button class="btn primary" aria-label="Search">${raw(icon.search)}<span class="label">Search</span></button>
-    </form>
-    <div id="results">${q ? loading(4) : html`<div class="empty"><h2>Search the catalogue</h2><p>Books, large print, DVDs, audiobooks and more.</p></div>`}</div>`);
-  const form = $("#searchform");
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const f = new FormData(form);
-    const nq = f.get("q").trim();
-    if (nq) location.hash = searchHref(nq, f.get("index"), f.get("sort") !== "relevance" ? { sort: f.get("sort") } : {});
-  });
-  form.sort.addEventListener("change", () => form.requestSubmit());
+    <div class="search-head">${searchForm("searchform", { q, index, branch: q ? branch : savedBranch(), autofocus: !q })}</div>
+    <div id="results">${q
+      ? html`<div style="margin-top:28px">${skeleton(4, 110)}</div>`
+      : html`<div class="empty"><h2>What are you looking for?</h2><p>Books, large print, DVDs, audiobooks and more.</p>
+          <div class="chips" style="justify-content:center;flex-wrap:wrap;margin-top:18px">${EXAMPLES.map(([t, i]) => html`<a class="chip" href="${searchHref(t, i)}">${t}</a>`)}</div></div>`}</div>`);
+  wireSearchForm($("#searchform"), () => (sort !== "relevance" ? { sort } : {}));
   if (!q) return;
 
   try {
     const [r, cfg] = await Promise.all([
-      api(`/search?${new URLSearchParams({ q, index, sort, page, limit: 20 })}`),
+      api(`/search?${new URLSearchParams({ q, index, sort, page, limit: 20, ...(branch && { branch }) })}`),
       getConfig().catch(() => ({})),
     ]);
     if (!r.hits.length) {
-      $("#results").innerHTML = String(html`<div class="empty"><h2>No results</h2><p>Try fewer words, or search everything instead of one field.</p></div>`);
+      fill($("#results"), html`<div class="empty"><h2>No results for “${q}”</h2><p>Try fewer words${index !== "keyword" ? html`, or <a href="${searchHref(q, "keyword", { branch })}">search everything</a>` : ""}${branch ? html`, or <a href="${searchHref(q, index, { branch: "" })}" data-all-branches>search all branches</a>` : ""}.</p></div>`);
       return;
     }
-    const pageHref = (p) => searchHref(q, index, { ...(sort !== "relevance" && { sort }), page: p });
-    $("#results").innerHTML = String(html`
-      <p class="muted small" style="margin-top:16px">${r.total.toLocaleString()} results${r.totalPages > 1 ? ` · page ${r.page} of ${r.totalPages}` : ""}</p>
-      <div class="hits">${r.hits.map((h) => hitCard(h, { save: cfg.hasCredentials }))}</div>
-      ${r.totalPages > 1 ? html`<nav class="pager">
-        ${r.page > 1 ? html`<a class="btn" href="${pageHref(r.page - 1)}">← Previous</a>` : ""}
-        <span class="muted small">Page ${r.page} of ${r.totalPages}</span>
-        ${r.page < r.totalPages ? html`<a class="btn" href="${pageHref(r.page + 1)}">Next →</a>` : ""}
-      </nav>` : ""}`);
+    const pageHref = (p) => searchHref(q, index, { branch, ...(sort !== "relevance" && { sort }), page: p });
+    fill($("#results"), html`<div class="fade-in">
+      <div class="results-head">
+        <h2>${r.total.toLocaleString()} ${r.total === 1 ? "result" : "results"}${branchName(cfg, branch) ? html` <span class="muted" style="font-weight:500">at ${branchName(cfg, branch)}</span>` : ""}</h2>
+        <select class="select bare" id="sort" aria-label="Sort results">${options(SORTS, sort)}</select>
+      </div>
+      <div class="hits">${r.hits.map((h) => hitCard(h, { save: cfg.hasCredentials, branch }))}</div>
+      ${pager(r.page, r.totalPages, pageHref)}</div>`);
+    $("#sort").addEventListener("change", (e) => { location.hash = searchHref(q, index, { branch, ...(e.target.value !== "relevance" && { sort: e.target.value }) }); });
   } catch (e) {
-    $("#results").innerHTML = String(html`<div style="margin-top:20px">${errorBox(e)}</div>`);
+    fill($("#results"), html`<div style="margin-top:24px">${errorBox(e)}</div>`);
   }
 }
 
-function availabilityPill(status, electronic) {
-  if (electronic) return html`<span class="pill accent">Libby</span>`;
-  if (!status) return "";
-  // Vega sends codes like "CheckedOut" and "CheckAvailability": "Checked out", "Check availability".
-  const label = status.replace(/([a-z])([A-Z])/g, (_, a, b) => `${a} ${b.toLowerCase()}`);
-  const tone = /^available/i.test(label) ? "ok" : /checked out|on order|unavailable|in process/i.test(label) ? "warn" : "";
-  return html`<span class="pill ${tone}"><span class="dot"></span>${label}</span>`;
+const branchName = (cfg, code) => (code ? shortBranch(cfg.branches?.find((b) => b.code === code)?.name) : "");
+
+// Vega sends codes like "CheckedOut" and "CheckAvailability": "Checked out", "Check availability".
+const statusLabel = (s) => (s ?? "").replace(/([a-z])([A-Z])/g, (_, a, b) => `${a} ${b.toLowerCase()}`);
+const statusTone = (label) => (/^available/i.test(label) ? "ok" : /checked out|on order|unavailable|in process|transit|hold/i.test(label) ? "warn" : "");
+
+// branch: with the branch filter on, say how this format stands there when the hit lists it.
+function formatChip(f, branch) {
+  const name = formatName(f.format);
+  if (f.electronic) return html`<span class="fmt libby" title="Borrow it in the Libby app"><span class="dot"></span>${name}<span class="s">Libby</span></span>`;
+  const here = branch && f.branches?.filter((b) => b.code === branch);
+  let label = statusLabel(f.status);
+  let tone = statusTone(label);
+  const inBranches = f.branches?.filter((b) => b.available) ?? [];
+  let s = tone === "ok" && inBranches.length ? `at ${inBranches.length}${f.moreBranches ? "+" : ""} ${inBranches.length === 1 ? "branch" : "branches"}` : label;
+  // With the branch filter on, results list that branch for every format it holds.
+  if (here?.length) {
+    const avail = here.some((b) => b.available);
+    tone = avail ? "ok" : "warn";
+    s = `${avail ? "at" : "out at"} ${shortBranch(here[0].name)}`;
+  } else if (branch && f.branches?.length) {
+    tone = "";
+    s = "not at this branch";
+  }
+  const title = inBranches.length ? `On the shelf at ${inBranches.map((b) => shortBranch(b.name)).join(", ")}` : "";
+  const inner = html`<span class="dot${tone ? "" : " none"}"></span>${name}${s ? html`<span class="s">${s}</span>` : ""}`;
+  const ed = f.editions[0];
+  return ed
+    ? html`<a class="fmt ${tone}" href="#/record/${ed.recordId}" title="${title}">${inner}</a>`
+    : html`<span class="fmt ${tone}" title="${title}">${inner}</span>`;
 }
 
-// opts.save: show a "Save" button (needs a card); opts.removeFrom: a list id to show "Remove" for.
+// opts.save: show a save button (needs a card); opts.removeFrom: a list id to show "Remove" for.
 function hitCard(hit, opts = {}) {
   const first = hit.recordId ?? hit.formats.flatMap((f) => f.editions)[0]?.recordId;
   const href = first ? `#/record/${first}` : null;
   const item = { formatGroupId: hit.id, recordId: first, title: cleanTitle(hit.title) };
-  const actions = opts.removeFrom
-    ? html`<button class="btn sm" data-list-remove="${opts.removeFrom}" data-item="${JSON.stringify(item)}">Remove</button>`
-    : opts.save && hit.id ? html`<button class="btn sm ghost" data-save="${JSON.stringify(item)}" aria-label="Save ${item.title} to a list">${raw(icon.bookmark)} Save</button>` : "";
-  return html`<article class="card hit${actions ? " has-actions" : ""}">
-    ${href ? html`<a href="${href}" aria-hidden="true" tabindex="-1">${cover(hit.title, hit.author, { isbn: hit.isbn })}</a>` : cover(hit.title, hit.author, { isbn: hit.isbn })}
+  const side = opts.removeFrom
+    ? html`<button class="btn sm quiet danger" data-list-remove="${opts.removeFrom}" data-item="${JSON.stringify(item)}">Remove</button>`
+    : opts.save && hit.id ? html`<button class="btn icon quiet" data-save="${JSON.stringify(item)}" aria-label="Save ${item.title} to a list" title="Save to a list">${raw(icon.bookmark)}</button>` : "";
+  const art = cover(hit.title, hit.author, { isbn: hit.isbn, src: hit.cover });
+  return html`<article class="hit">
+    ${href ? html`<a href="${href}" aria-hidden="true" tabindex="-1">${art}</a>` : html`<div>${art}</div>`}
     <div>
       <h3>${href ? html`<a href="${href}">${cleanTitle(hit.title)}</a>` : cleanTitle(hit.title)}</h3>
-      <p class="muted small">${[prettyName(hit.author), hit.year].filter(Boolean).join(" · ")}</p>
-      <div class="formats">${hit.formats.map((f) => {
-        const ed = f.editions[0];
-        const avail = f.branches?.filter((b) => b.available).length ?? 0;
-        return html`<div class="format-row">
-          <span class="name">${ed ? html`<a href="#/record/${ed.recordId}">${formatName(f.format)}</a>` : formatName(f.format)}</span>
-          ${availabilityPill(f.status, f.electronic)}
-          ${!f.electronic && f.branches?.length ? html`<span class="muted small">${avail ? `in at ${plural(avail, "branch")}${f.moreBranches ? "+" : ""}` : `${plural(f.branches.length, "branch")}`}</span>` : ""}
-          ${f.editions.length > 1 ? html`<span class="muted small">${f.editions.length} editions</span>` : ""}
-        </div>`;
-      })}</div>
+      <p class="by">${[prettyName(hit.author), hit.year].filter(Boolean).join(" · ")}</p>
+      <div class="formats">${hit.formats.map((f) => formatChip(f, opts.branch))}</div>
     </div>
-    ${actions ? html`<div class="hit-actions">${actions}</div>` : ""}
+    <div class="side">${side}</div>
   </article>`;
 }
 
+// ---- Record -----------------------------------------------------------------------
+
 async function recordPage(id) {
-  render(html`<a class="back" href="#/search" data-back>${raw(icon.back)} Back</a>${loading(2)}`);
+  const back = html`<a class="back" href="#/search" data-back>${raw(icon.back)} Back</a>`;
+  render(html`${back}<div class="record"><div class="skeleton record-cover" style="aspect-ratio:2/3"></div>${skeleton(3, 60)}</div>`);
   let rec;
   try {
     rec = await api(`/records/${encodeURIComponent(id)}`);
   } catch (e) {
-    render(html`<a class="back" href="#/search">${raw(icon.back)} Search</a>${errorBox(e)}`);
+    render(html`${back}${errorBox(e)}`);
     return;
   }
-  const author = rec.contributors?.[0]?.name;
+  document.title = `${cleanTitle(rec.title)} · Library Helper`;
+  const authors = (rec.contributors ?? []).filter((c) => !c.role || c.role === "aut").slice(0, 3);
   const cfg = await getConfig().catch(() => ({}));
   const meta = [
-    ["Format", formatName(rec.format)],
     ["Edition", rec.edition],
     ["Published", rec.published ?? rec.year],
-    ["Description", rec.extent?.replace(/\s*[:;,/]\s*$/, "")],
+    ["Length", rec.extent?.replace(/\s*[:;,/]\s*$/, "")],
     ["Call number", rec.callNumber],
     ["Language", languageName(rec.language)],
-    ["ISBN", rec.isbn?.join(", ")],
+    ["ISBN", rec.isbn?.[0]],
   ].filter(([, v]) => v);
-  render(html`
-    <a class="back" href="#/search" data-back>${raw(icon.back)} Back</a>
-    <div class="record">
-      <div>${cover(rec.title, author, { large: true, isbn: rec.isbn?.[0] })}</div>
+  const long = (rec.summary?.length ?? 0) > 420;
+  render(html`${back}
+    <div class="record fade-in">
+      <div class="record-cover">${cover(rec.title, authors[0]?.name, { size: "lg", isbn: rec.isbn?.[0], src: rec.cover })}</div>
       <div class="stack">
         <div>
+          <p class="eyebrow">${[formatName(rec.format), rec.year].filter(Boolean).join(" · ")}</p>
           <h1>${cleanTitle(rec.title)}</h1>
-          ${author ? html`<p style="margin-top:8px;font-size:1.05rem">by ${rec.contributors.filter((c) => !c.role || c.role === "aut").slice(0, 3).map((c, i) => html`${i ? ", " : ""}<a href="${searchHref(c.name.replace(/[.,]$/, ""), "author")}">${prettyName(c.name)}</a>`)}</p>` : ""}
+          ${authors.length ? html`<p class="byline">by ${authors.map((c, i) => html`${i ? ", " : ""}<a href="${searchHref(c.name.replace(/[.,]$/, ""), "author")}">${prettyName(c.name)}</a>`)}</p>` : ""}
         </div>
-        <div class="row">
-          ${availabilityPill(rec.status)}
-          ${cfg.hasCredentials ? html`<button class="btn primary" id="hold-btn">Place hold</button>
-            <button class="btn" data-save="${JSON.stringify({ formatGroupId: rec.formatGroupId, recordId: rec.recordId, title: cleanTitle(rec.title) })}">${raw(icon.bookmark)} Save to list</button>` : ""}
-        </div>
-        ${rec.summary ? html`<p class="summary">${rec.summary}</p>` : ""}
-        <dl class="meta">${meta.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>
-        ${rec.subjects?.length ? html`<div><h3 style="margin-bottom:8px">Subjects</h3><div class="tags">${rec.subjects.map((s) => html`<a href="${searchHref(s.replace(/--/g, " "), "subject")}">${s.replace(/--/g, " › ")}</a>`)}</div></div>` : ""}
-        ${rec.otherFormats?.length ? html`<div><h3 style="margin-bottom:8px">Other formats &amp; editions</h3><div class="tags">${rec.otherFormats.map((f) => html`<a href="#/record/${f.recordId}">${formatName(f.format)}${f.year ? ` · ${f.year}` : ""}</a>`)}</div></div>` : ""}
+        <div id="avail" class="availability"><span class="dot" style="color:var(--faint)"></span><span class="muted">Checking the shelves…</span></div>
+        ${cfg.hasCredentials ? html`<div class="actions">
+          <button class="btn primary" id="hold-btn">Place hold</button>
+          <button class="btn" data-save="${JSON.stringify({ formatGroupId: rec.formatGroupId, recordId: rec.recordId, title: cleanTitle(rec.title) })}">${raw(icon.bookmark)} Save</button>
+        </div>` : ""}
+        ${rec.summary ? html`<div><p class="summary${long ? " clamp" : ""}" id="summary">${rec.summary}</p>${long ? html`<button class="read-more" id="more" aria-expanded="false">Read more</button>` : ""}</div>` : ""}
+        ${meta.length ? html`<dl class="meta">${meta.map(([k, v]) => html`<div><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>` : ""}
+        <div id="copies"></div>
+        ${rec.otherFormats?.length ? html`<div><p class="label">Other formats &amp; editions</p><div class="editions">${rec.otherFormats.map((f) => html`<a href="#/record/${f.recordId}">${formatName(f.format)}<span>${f.year ?? "Edition"}</span></a>`)}</div></div>` : ""}
+        ${rec.subjects?.length ? html`<div><p class="label">Subjects</p><div class="tags">${rec.subjects.map((s) => html`<a href="${searchHref(s.replace(/--/g, " "), "subject")}">${s.replace(/--/g, " › ")}</a>`)}</div></div>` : ""}
       </div>
-    </div>
-    <div class="section-head"><h2>Copies</h2><span class="muted small" id="copy-count"></span></div>
-    <div id="copies">${loading(1)}</div>`);
+    </div>`);
   $("#hold-btn")?.addEventListener("click", () => holdDialog(rec));
+  $("#more")?.addEventListener("click", (e) => {
+    const clamped = $("#summary").classList.toggle("clamp");
+    e.target.textContent = clamped ? "Read more" : "Show less";
+    e.target.setAttribute("aria-expanded", String(!clamped));
+  });
 
+  const avail = $("#avail");
   try {
     const copies = await api(`/records/${encodeURIComponent(id)}/availability`);
-    const avail = copies.filter((c) => c.available).length;
-    $("#copy-count").textContent = `${avail} of ${copies.length} ${copies.length === 1 ? "copy" : "copies"} available`;
     copies.sort((a, b) => Number(b.available) - Number(a.available) || (a.branch ?? "").localeCompare(b.branch ?? ""));
-    $("#copies").innerHTML = String(copies.length
-      ? html`<div class="card table-wrap"><table class="table copies">
-          <thead><tr><th>Branch</th><th class="call">Call number</th><th>Status</th><th>Due</th></tr></thead>
-          <tbody>${copies.map((c) => html`<tr>
-            <td>${c.branch}${c.volume ? html` <span class="muted small">${c.volume}</span>` : ""}</td>
-            <td class="call">${c.callNumber}</td>
-            <td><span class="pill ${c.available ? "ok" : "warn"}"><span class="dot"></span>${c.status}</span></td>
-            <td class="muted nowrap">${c.dueDate ? fmtDay(c.dueDate) : "—"}</td></tr>`)}</tbody></table></div>`
-      : html`<p class="muted">No physical copies. This may be a Libby title.</p>`);
+    const inBranches = [...new Set(copies.filter((c) => c.available).map((c) => shortBranch(c.branch)))];
+    const nextDue = copies.map((c) => c.dueDate).filter(Boolean).sort((a, b) => toDate(a) - toDate(b))[0];
+    if (!copies.length) {
+      fill(avail, html`<span class="dot" style="color:var(--accent)"></span><span>No physical copies. This may be a Libby title.</span>`);
+    } else if (inBranches.length) {
+      avail.classList.add("ok");
+      fill(avail, html`<span class="dot"></span><span><strong>On the shelf</strong> at ${listJoin(inBranches)}</span>`);
+    } else {
+      avail.classList.add("warn");
+      fill(avail, html`<span class="dot"></span><span><strong>${copies.length === 1 ? "The only copy is out" : `All ${copies.length} copies are out`}</strong>${nextDue ? ` · next due back ${fmtDay(nextDue)}` : ""}</span>`);
+    }
+    if (copies.length) fill($("#copies"), html`<div>
+      <p class="label">${copies.length === 1 ? "1 copy" : `${copies.length} copies`}</p>
+      <div class="panel rows">${copies.map((c) => html`<div class="copy">
+        <span class="where">${c.branch}${c.volume ? html` <span class="muted small">${c.volume}</span>` : ""}</span>
+        <span class="state"><span class="tag ${c.available ? "ok" : "warn"}"><span class="dot"></span>${c.status}</span>${c.dueDate ? html`<span class="muted">due ${fmtDay(c.dueDate)}</span>` : ""}</span>
+        <span class="call">${c.callNumber}</span>
+      </div>`)}</div></div>`);
   } catch (e) {
-    $("#copies").innerHTML = String(errorBox(e));
+    fill(avail, html`<span class="muted">${e.message}</span>`);
   }
 }
 
@@ -377,8 +585,8 @@ async function holdDialog(rec) {
     preferred = cfg.pickupLocations.find((p) => p.name === s?.preferredPickupLocation)?.code ?? "";
   }
   const dlg = $("#dialog");
-  dlg.innerHTML = String(html`<form method="dialog">
-    <div><h2>Place a hold</h2><p class="muted small" style="margin-top:6px">${cleanTitle(rec.title)}${rec.format ? ` · ${formatName(rec.format)}` : ""}</p></div>
+  fill(dlg, html`<form method="dialog">
+    <div><h2>Place a hold</h2><p class="sub">${cleanTitle(rec.title)}${rec.format ? ` · ${formatName(rec.format)}` : ""}</p></div>
     <div class="field"><label for="pickup">Pick up at</label>
       <select id="pickup" class="select" name="pickup" required>
         <option value="">Choose a branch…</option>
@@ -397,135 +605,164 @@ async function holdDialog(rec) {
     try {
       const r = await api("/holds", { method: "POST", body: { recordId: rec.recordId, pickupLocation } });
       toast(`Hold placed for pickup at ${r.pickupLocation?.name ?? "your branch"}.`);
+      if (btn) btn.textContent = "Hold placed";
       refreshBadge();
     } catch (e) {
       toast(e.message, "bad");
-    } finally {
       if (btn) btn.disabled = false;
     }
   }, { once: true });
 }
 
-// ---- Account ------------------------------------------------------------------
+// ---- Borrowed, Lists, Account ---------------------------------------------------
+// Three pages over the patron's card: what's borrowed or on the way, the reading
+// lists they keep, and the account record (fines, history).
 
-const TABS = [["loans", "Checked out"], ["holds", "Holds"], ["lists", "Lists"], ["fines", "Fines"], ["history", "History"]];
+const PAGES = {
+  borrowed: { title: "Borrowed", tabs: [["loans", "Checked out", loansTab], ["holds", "Holds", holdsTab]] },
+  lists: { title: "Lists", tabs: [["", "Lists", listsTab]] },
+  account: { title: "Account", tabs: [["fines", "Fines", finesTab], ["history", "History", historyTab]], cardMeta: true },
+};
 
-async function accountPage(tab = "loans") {
+// Old #/account/<tab> links from before the split.
+const MOVED = { loans: "#/borrowed/loans", holds: "#/borrowed/holds", lists: "#/lists" };
+
+async function patronPage(section, tab) {
+  const page = PAGES[section];
+  const current = page.tabs.find(([k]) => k === tab) ?? page.tabs[0];
   const cfg = await getConfig().catch((e) => ({ error: e }));
   if (cfg.error) return render(errorBox(cfg.error));
-  if (!cfg.hasCredentials) return render(noCard());
+  if (!cfg.hasCredentials) {
+    render(html`<div class="page-head"><div><h1>${page.title}</h1></div></div>${signInPanel()}`);
+    wireSignIn();
+    return;
+  }
   render(html`
-    <div class="row spread"><h1>My account</h1><span class="muted small" id="card-meta"></span></div>
-    <div id="summary" style="margin-top:20px">${loading(1)}</div>
-    <nav class="tabs">${TABS.map(([k, l]) => html`<a href="#/account/${k}" class="${k === tab ? "active" : ""}">${l}<span class="count" data-count="${k}" hidden></span></a>`)}</nav>
-    <div id="tab">${loading(3)}</div>`);
+    <div class="page-head"><div><h1>${page.title}</h1>${page.cardMeta ? html`<p class="sub" id="card-meta">&nbsp;</p>` : ""}</div>
+      ${page.cardMeta ? html`<button class="btn sm" id="signout">Sign out${cfg.card ? ` of ${cfg.card}` : ""}</button>` : ""}</div>
+    ${page.tabs.length > 1 ? html`<nav class="chips tabs" aria-label="${page.title}">${page.tabs.map(([k, l]) => html`<a class="chip" href="#/${section}/${k}" ${raw(k === current[0] ? 'aria-current="page"' : "")} data-tab="${k}">${l}</a>`)}</nav>` : ""}
+    <div id="tab">${skeleton(3, 72)}</div>`);
 
+  $("#signout")?.addEventListener("click", signOut);
   getAccount().then((s) => {
-    $("#summary").innerHTML = String(statTiles(s));
-    $("#card-meta").textContent = [s.homeLibrary && `Home: ${s.homeLibrary}`, s.cardExpires && `Card expires ${fmtDate(s.cardExpires)}`].filter(Boolean).join(" · ");
-    setCount("loans", s.loans);
-    setCount("holds", s.holds);
+    const meta = $("#card-meta");
+    if (meta) meta.textContent = [cfg.card, s.homeLibrary, s.cardExpires && `Card expires ${fmtDate(s.cardExpires)}`].filter(Boolean).join(" · ");
+    setTabInfo("loans", s.loans, s.overdue ? "bad" : "");
+    setTabInfo("holds", s.holds, s.holdsReadyForPickup ? "ok" : "");
+    if (s.moneyOwed > 0) setTabInfo("fines", money.format(s.moneyOwed), "bad");
     updateBadge(s);
-  }).catch((e) => { $("#summary").innerHTML = String(errorBox(e)); });
+  }).catch(() => {});
 
-  const view = { loans: loansTab, holds: holdsTab, lists: listsTab, fines: finesTab, history: historyTab }[tab] ?? loansTab;
+  const el = $("#tab");
   try {
-    await view($("#tab"));
+    await current[2](el);
+    el.classList.add("fade-in");
   } catch (e) {
-    $("#tab").innerHTML = String(errorBox(e));
+    fill(el, errorBox(e));
   }
 }
 
-function setCount(k, n) {
-  const el = $(`[data-count="${k}"]`);
-  if (el) { el.textContent = n; el.hidden = false; }
+// Adds a count (and a coloured dot when something needs attention) to a tab chip.
+function setTabInfo(k, n, alert = "") {
+  const a = $(`[data-tab="${k}"]`);
+  if (!a) return;
+  $$(".n, .alert", a).forEach((x) => x.remove());
+  a.insertAdjacentHTML("beforeend", String(html`<span class="n">${n}</span>${alert ? html`<span class="alert ${alert}"></span>` : ""}`));
 }
 
 async function loansTab(el) {
   const loans = await api("/loans");
   if (!loans.length) {
-    el.innerHTML = String(html`<div class="card empty"><h2>Nothing checked out</h2><p><a href="#/search">Find something to read →</a></p></div>`);
+    fill(el, emptyState("Nothing checked out", "Find something good to read.", searchCta));
     return;
   }
+  loans.sort((a, b) => toDate(a.dueDate) - toDate(b.dueDate));
   const renewable = loans.filter((l) => l.canRenew);
-  el.innerHTML = String(html`<div class="card">
+  fill(el, html`
     <div class="toolbar">
-      <label class="row" style="gap:8px"><input type="checkbox" class="check" id="all" ${raw(renewable.length ? "" : "disabled")}> Select renewable</label>
-      <button class="btn primary sm" id="renew-sel" disabled>${raw(icon.refresh)} Renew selected</button>
+      <span class="muted">${plural(loans.length, "item")}, soonest due first</span>
+      ${renewable.length > 1 ? html`<button class="btn sm" id="renew-all">${raw(icon.refresh)} Renew all ${renewable.length}</button>` : ""}
     </div>
-    <div class="list">${loans.map((l) => {
+    <div class="panel rows">${loans.map((l) => {
       const due = relDue(l.dueDate);
       return html`<div class="item">
-        <input type="checkbox" class="check" name="loan" value="${l.checkoutId}" aria-label="Select ${l.title}" ${raw(l.canRenew ? "" : "disabled")}>
+        <span>${cover(l.title, undefined, { size: "xs", src: l.cover })}</span>
         <div>
           <div class="title">${cleanTitle(l.title)}</div>
           <div class="sub">
             ${l.format ? html`<span>${formatName(l.format)}</span>` : ""}
-            ${l.source !== "library" ? html`<span title="${l.note ?? ""}">Libby · renew in the app</span>` : ""}
+            ${l.source !== "library" ? html`<span title="${l.note ?? ""}">Libby: renew in the app</span>` : ""}
             ${l.renewalLimit != null ? html`<span>Renewed ${l.renewals ?? 0} of ${l.renewalLimit}</span>` : ""}
           </div>
         </div>
-        <div class="actions">
-          <span class="pill ${due.tone}">${due.text}</span>
+        <div class="end">
+          <span class="tag ${due.tone}">${due.text}</span>
           ${l.canRenew ? html`<button class="btn sm" data-renew="${l.checkoutId}">Renew</button>` : ""}
         </div>
       </div>`;
-    })}</div></div>`);
+    })}</div>`);
 
-  const boxes = [...el.querySelectorAll('input[name="loan"]:not(:disabled)')];
-  const sync = () => { $("#renew-sel", el).disabled = !boxes.some((b) => b.checked); };
-  boxes.forEach((b) => b.addEventListener("change", sync));
-  $("#all", el).addEventListener("change", (e) => { boxes.forEach((b) => (b.checked = e.target.checked)); sync(); });
   const renew = async (ids, btn) => {
     btn.disabled = true;
     try {
       const results = await api("/loans/renew", { method: "POST", body: { checkoutIds: ids } });
       const ok = results.filter((r) => r.renewed).length;
-      const failed = results.filter((r) => !r.renewed);
       if (ok) toast(`Renewed ${plural(ok, "item")}.`);
-      for (const f of failed) toast(`Couldn't renew: ${f.reason}`, "bad");
+      for (const f of results.filter((r) => !r.renewed)) toast(`Couldn't renew: ${f.reason}`, "bad");
       route();
+      refreshBadge();
     } catch (e) {
       toast(e.message, "bad");
       btn.disabled = false;
     }
   };
-  $("#renew-sel", el).addEventListener("click", (e) => renew(boxes.filter((b) => b.checked).map((b) => b.value), e.currentTarget));
-  el.querySelectorAll("[data-renew]").forEach((b) => b.addEventListener("click", () => renew([b.dataset.renew], b)));
+  $("#renew-all", el)?.addEventListener("click", (e) => renew(renewable.map((l) => l.checkoutId), e.currentTarget));
+  $$("[data-renew]", el).forEach((b) => b.addEventListener("click", () => renew([b.dataset.renew], b)));
 }
 
 async function holdsTab(el) {
   const holds = await api("/holds");
   if (!holds.length) {
-    el.innerHTML = String(html`<div class="card empty"><h2>No holds</h2><p>Place a hold from any catalogue record.</p></div>`);
+    fill(el, emptyState("No holds", "Place a hold from any title's page and it'll show up here.", searchCta));
     return;
   }
-  holds.sort((a, b) => Number(b.readyForPickup) - Number(a.readyForPickup) || (a.queuePosition ?? 0) - (b.queuePosition ?? 0));
-  el.innerHTML = String(html`<div class="card list">${holds.map((h) => html`<div class="item">
-    <span></span>
-    <div>
-      <div class="title">${h.recordId ? html`<a href="#/record/${h.recordId}" style="color:inherit">${cleanTitle(h.title)}</a>` : cleanTitle(h.title)}</div>
-      <div class="sub">
-        ${h.format ? html`<span>${formatName(h.format)}</span>` : ""}
-        ${h.pickupLocation ? html`<span>Pickup: ${h.pickupLocation.name}</span>` : ""}
-        ${h.queuePosition != null && !h.readyForPickup ? html`<span>#${h.queuePosition} in line</span>` : ""}
-        ${h.expires ? html`<span>${h.readyForPickup ? "Pick up by" : "Expires"} ${fmtDate(h.expires)}</span>` : ""}
-        ${h.frozen ? html`<span>Frozen</span>` : ""}
+  holds.sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0));
+  const ready = holds.filter((h) => h.readyForPickup);
+  const waiting = holds.filter((h) => !h.readyForPickup);
+  const row = (h) => {
+    const title = cleanTitle(h.title);
+    const art = cover(h.title, undefined, { size: "xs", src: h.cover });
+    return html`<div class="item">
+      ${h.recordId ? html`<a class="cover-link" href="#/record/${h.recordId}" tabindex="-1" aria-hidden="true">${art}</a>` : html`<span>${art}</span>`}
+      <div>
+        <div class="title">${h.recordId ? html`<a href="#/record/${h.recordId}">${title}</a>` : title}</div>
+        <div class="sub">
+          ${h.format ? html`<span>${formatName(h.format)}</span>` : ""}
+          ${h.pickupLocation ? html`<span>${shortBranch(h.pickupLocation.name)}</span>` : ""}
+          ${h.readyForPickup && h.expires ? html`<span>Pick up by ${fmtDay(h.expires)}</span>` : ""}
+          ${!h.readyForPickup && h.queuePosition != null ? html`<span>#${h.queuePosition} in line</span>` : ""}
+          ${h.frozen ? html`<span>Paused</span>` : ""}
+        </div>
       </div>
-    </div>
-    <div class="actions">
-      <span class="pill ${h.readyForPickup ? "ok" : h.status === "in transit" ? "accent" : ""}">${h.readyForPickup ? "Ready for pickup" : h.status}</span>
-      <button class="btn sm danger" data-cancel="${h.holdId}" data-title="${cleanTitle(h.title)}">Cancel</button>
-    </div>
-  </div>`)}</div>`);
-  el.querySelectorAll("[data-cancel]").forEach((b) => b.addEventListener("click", async () => {
-    if (!(await confirmDialog(`Cancel the hold on “${b.dataset.title}”?`, "You'll lose your place in line. This can't be undone.", "Cancel hold"))) return;
+      <div class="end">
+        ${h.readyForPickup ? html`<span class="tag ok"><span class="dot"></span>Ready</span>` : h.status === "in transit" ? html`<span class="tag accent">In transit</span>` : ""}
+        <button class="btn sm quiet danger" data-cancel="${h.holdId}" data-title="${title}">Cancel</button>
+      </div>
+    </div>`;
+  };
+  fill(el, html`<div class="panel rows">
+    ${ready.length ? html`<div class="group-head">Ready for pickup<span>${ready.length}</span></div>${ready.map(row)}` : ""}
+    ${waiting.length ? html`<div class="group-head">Waiting<span>${waiting.length}</span></div>${waiting.map(row)}` : ""}
+  </div>`);
+  $$("[data-cancel]", el).forEach((b) => b.addEventListener("click", async () => {
+    if (!(await confirmDialog(`Cancel your hold on “${b.dataset.title}”?`, "You'll lose your place in line. This can't be undone.", "Cancel hold"))) return;
     b.disabled = true;
     try {
       const [r] = await api("/holds/cancel", { method: "POST", body: { holdIds: [b.dataset.cancel] } });
       if (r?.cancelled) toast("Hold cancelled.");
       else toast(`Couldn't cancel: ${r?.reason ?? "unknown error"}`, "bad");
       route();
+      refreshBadge();
     } catch (e) {
       toast(e.message, "bad");
       b.disabled = false;
@@ -535,8 +772,8 @@ async function holdsTab(el) {
 
 function confirmDialog(title, body, action) {
   const dlg = $("#dialog");
-  dlg.innerHTML = String(html`<form method="dialog">
-    <div><h2>${title}</h2><p class="muted small" style="margin-top:6px">${body}</p></div>
+  fill(dlg, html`<form method="dialog">
+    <div><h2>${title}</h2><p class="sub">${body}</p></div>
     <div class="actions"><button class="btn" value="no">Keep it</button><button class="btn primary" value="yes">${action}</button></div>
   </form>`);
   dlg.showModal();
@@ -549,36 +786,46 @@ const LIST_SORTS = [["date.desc", "Newest first"], ["date.asc", "Oldest first"],
 
 async function listsTab(el) {
   const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
-  const lists = await api("/lists");
-  setCount("lists", lists.reduce((n, l) => n + l.count, 0));
+  const [lists, cfg] = await Promise.all([api("/lists"), getConfig()]);
   if (!lists.length) {
-    el.innerHTML = String(html`<div class="card empty"><h2>No lists</h2></div>`);
+    fill(el, emptyState("No lists yet", "Save titles from search results to start a reading list."));
     return;
   }
   // Default to the first list with something on it, preferring the patron's own lists.
   const current = lists.find((l) => l.listId === params.get("list")) ?? lists.find((l) => l.count && l.type === "regular") ?? lists.find((l) => l.count) ?? lists[0];
   const sort = LIST_SORTS.some(([k]) => k === params.get("sort")) ? params.get("sort") : "date.desc";
   const page = Number(params.get("page")) || 1;
-  const href = (o) => `#/account/lists?${new URLSearchParams({ list: current.listId, sort, ...o })}`;
-  el.innerHTML = String(html`
-    <div class="row spread" style="margin-bottom:12px">
-      <div class="list-picker" role="tablist">${lists.map((l) => html`<a role="tab" aria-selected="${String(l === current)}" class="${l === current ? "active" : ""}" href="#/account/lists?${new URLSearchParams({ list: l.listId, sort })}">${l.name} <span class="muted">${l.count}</span></a>`)}</div>
-      <select class="select" id="list-sort" aria-label="Sort list">${options(LIST_SORTS, sort)}</select>
+  const at = cfg.branches.some((b) => b.code === params.get("at")) ? params.get("at") : "";
+  const href = (o) => `#/lists?${new URLSearchParams({ list: current.listId, sort, ...(at && { at }), ...o })}`;
+  fill(el, html`
+    <div class="toolbar">
+      <div class="chips" aria-label="Lists">${lists.map((l) => html`<a class="chip" ${raw(l === current ? 'aria-current="page"' : "")} href="#/lists?${new URLSearchParams({ list: l.listId, sort, ...(at && { at }) })}">${l.name}<span class="n">${l.count}</span></a>`)}</div>
+      <div class="row" style="gap:8px">
+        <label class="branch-filter${at ? " on" : ""}" title="Only titles with a copy on the shelf at this branch now">${raw(icon.pin)}<span class="prefix">On the shelf at</span>
+          <select class="select bare" id="list-at"><option value="">any branch</option>${cfg.branches.map((b) => html`<option value="${b.code}"${raw(b.code === at ? " selected" : "")}>${shortBranch(b.name)}</option>`)}</select>
+        </label>
+        <select class="select bare" id="list-sort" aria-label="Sort list">${options(LIST_SORTS, sort)}</select>
+      </div>
     </div>
-    <div id="list-items">${loading(2)}</div>`);
+    <div id="list-items">${skeleton(2, 110)}</div>`);
   $("#list-sort", el).addEventListener("change", (e) => { location.hash = href({ sort: e.target.value }); });
+  $("#list-at", el).addEventListener("change", (e) => {
+    const p = new URLSearchParams({ list: current.listId, sort, ...(e.target.value && { at: e.target.value }) });
+    location.hash = `#/lists?${p}`;
+  });
   if (!current.count) {
-    $("#list-items", el).innerHTML = String(html`<div class="card empty"><h2>Nothing saved here yet</h2><p>Use <strong>Save</strong> on a search result or record to add titles.</p></div>`);
+    fill($("#list-items", el), emptyState("Nothing saved here yet", "Use the bookmark on a search result or title page to add it."));
     return;
   }
-  const r = await api(`/lists/${current.listId}/items?${new URLSearchParams({ sort, page, limit: 50 })}`);
-  $("#list-items", el).innerHTML = String(html`
-    <div class="hits">${r.items.map((h) => hitCard(h, { removeFrom: current.listId }))}</div>
-    ${r.totalPages > 1 ? html`<nav class="pager">
-      ${r.page > 1 ? html`<a class="btn" href="${href({ page: r.page - 1 })}">← Previous</a>` : ""}
-      <span class="muted small">Page ${r.page} of ${r.totalPages}</span>
-      ${r.page < r.totalPages ? html`<a class="btn" href="${href({ page: r.page + 1 })}">Next →</a>` : ""}
-    </nav>` : ""}`);
+  const r = await api(`/lists/${current.listId}/items?${new URLSearchParams({ sort, page, limit: 50, ...(at && { availableAt: at }) })}`);
+  const where = at ? branchName(cfg, at) : "";
+  if (!r.items.length && at) {
+    fill($("#list-items", el), emptyState(`Nothing on the shelf at ${where}`, "Nothing from this list is in right now. Try another branch.", html`<a class="btn" href="#/lists?${new URLSearchParams({ list: current.listId, sort })}">Show the whole list</a>`));
+    return;
+  }
+  fill($("#list-items", el), html`
+    ${at ? html`<p class="muted small" style="margin-bottom:4px">${plural(r.total ?? r.items.length, "title")} on the shelf at ${where}${current.count > 200 ? " (first 200 on the list checked)" : ""}</p>` : ""}
+    <div class="hits">${r.items.map((h) => hitCard(h, { removeFrom: current.listId, branch: at }))}</div>${pager(r.page, r.totalPages, (p) => href({ page: p }))}`);
 }
 
 async function updateList(item, add, remove) {
@@ -588,9 +835,9 @@ async function updateList(item, add, remove) {
 // Pick which lists a title is on. Ticks start from where it is now; saving sends the difference.
 async function saveDialog(item) {
   const dlg = $("#dialog");
-  dlg.innerHTML = String(html`<form method="dialog">
-    <div><h2>Save to list</h2><p class="muted small" style="margin-top:6px">${item.title}</p></div>
-    <div id="list-choices">${loading(1)}</div>
+  fill(dlg, html`<form method="dialog">
+    <div><h2>Save to a list</h2><p class="sub">${item.title}</p></div>
+    <div id="list-choices">${skeleton(2, 46)}</div>
     <div class="actions"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="ok" disabled>Save</button></div>
   </form>`);
   dlg.showModal();
@@ -598,12 +845,12 @@ async function saveDialog(item) {
   try {
     state = await api(`/lists/containing?${new URLSearchParams({ id: item.formatGroupId })}`);
   } catch (e) {
-    $("#list-choices", dlg).innerHTML = String(errorBox(e));
+    fill($("#list-choices", dlg), errorBox(e));
     return;
   }
   const on = new Set(state.containing);
-  $("#list-choices", dlg).innerHTML = String(html`<div class="stack" style="gap:10px">${state.lists.map((l) => html`
-    <label class="row" style="gap:10px"><input type="checkbox" class="check" name="list" value="${l.listId}" ${raw(on.has(l.listId) ? "checked" : "")}> ${l.name} <span class="muted small">${l.count}</span></label>`)}</div>`);
+  fill($("#list-choices", dlg), html`<div class="choices">${state.lists.map((l) => html`
+    <label class="choice"><input type="checkbox" class="check" name="list" value="${l.listId}" ${raw(on.has(l.listId) ? "checked" : "")}>${l.name}<span class="n">${plural(l.count, "title")}</span></label>`)}</div>`);
   // Nothing ticked yet: pre-tick the first own list so one click saves.
   if (!on.size) {
     const def = state.lists.find((l) => l.type === "regular") ?? state.lists[0];
@@ -613,7 +860,7 @@ async function saveDialog(item) {
   $('button[value="ok"]', dlg).disabled = false;
   dlg.addEventListener("close", async () => {
     if (dlg.returnValue !== "ok") return;
-    const ticked = new Set([...dlg.querySelectorAll('input[name="list"]:checked')].map((b) => b.value));
+    const ticked = new Set($$('input[name="list"]:checked', dlg).map((b) => b.value));
     const add = [...ticked].filter((id) => !on.has(id));
     const remove = [...on].filter((id) => !ticked.has(id));
     if (!add.length && !remove.length) return;
@@ -628,6 +875,7 @@ async function saveDialog(item) {
 }
 
 document.addEventListener("click", async (e) => {
+  if (e.target.closest?.("[data-all-branches]")) store.set("branch", "");
   const save = e.target.closest?.("[data-save]");
   if (save) {
     e.preventDefault();
@@ -652,38 +900,43 @@ document.addEventListener("click", async (e) => {
 
 async function finesTab(el) {
   const f = await api("/fines");
-  el.innerHTML = String(html`<div class="card">
-    <div class="toolbar"><strong>Total outstanding</strong><strong>${money.format(f.totalOutstanding)}</strong></div>
-    ${f.fines.length
-      ? html`<div class="table-wrap"><table class="table"><thead><tr><th>Item</th><th>Charge</th><th>Date</th><th class="num">Amount</th></tr></thead><tbody>
-          ${f.fines.map((x) => html`<tr>
-            <td>${cleanTitle(x.title) || x.description || "—"}${x.title && x.description ? html`<div class="muted small">${x.description}</div>` : ""}</td>
-            <td class="muted">${x.type ?? ""}</td>
-            <td class="muted">${fmtDate(x.date)}</td>
-            <td class="num">${money.format(x.amount)}</td></tr>`)}
-        </tbody></table></div>`
-      : html`<div class="empty"><h2>All clear</h2><p>No fines or fees on this card.</p></div>`}
+  if (!f.fines.length) {
+    fill(el, emptyState("All clear", "No fines or fees on this card."));
+    return;
+  }
+  fill(el, html`<div class="panel rows">
+    <div class="total"><span class="muted">Total owed</span><span class="amount">${money.format(f.totalOutstanding)}</span></div>
+    ${f.fines.map((x) => html`<div class="item plain">
+      <div>
+        <div class="title">${cleanTitle(x.title) || x.description || "Charge"}</div>
+        <div class="sub">${x.type ? html`<span>${x.type}</span>` : ""}${x.date ? html`<span>${fmtDate(x.date)}</span>` : ""}${x.title && x.description ? html`<span>${x.description}</span>` : ""}</div>
+      </div>
+      <div class="end"><strong style="font-variant-numeric:tabular-nums">${money.format(x.amount)}</strong></div>
+    </div>`)}
   </div>`);
 }
 
 async function historyTab(el) {
   const h = await api("/history");
   if (!h.enabled) {
-    el.innerHTML = String(html`<div class="card empty"><h2>Reading history is off</h2><p>${h.message}</p></div>`);
+    fill(el, emptyState("Reading history is off", h.message));
     return;
   }
   if (!h.items.length) {
-    el.innerHTML = String(html`<div class="card empty"><h2>No history yet</h2></div>`);
+    fill(el, emptyState("No history yet", "Books you borrow will show up here."));
     return;
   }
-  el.innerHTML = String(html`<p class="muted small" style="margin-bottom:10px">${h.total} items</p><div class="card list">${h.items.map((x) => {
-    const title = cleanTitle(x.title);
-    const href = x.recordId ? `#/record/${x.recordId}` : searchHref(title, "title");
-    return html`<div class="item"><span></span><div>
-      <div class="title"><a href="${href}" style="color:inherit">${title}</a></div>
-      <div class="sub">${x.author ? html`<span>${prettyName(x.author)}</span>` : ""}${x.format ? html`<span>${formatName(x.format)}</span>` : ""}</div>
-    </div><div class="actions muted small">${fmtDate(x.checkedOut)}</div></div>`;
-  })}</div>`);
+  fill(el, html`<div class="toolbar"><span class="muted">${plural(h.total, "book")} borrowed</span></div>
+    <div class="panel rows">${h.items.map((x) => {
+      const title = cleanTitle(x.title);
+      const href = x.recordId ? `#/record/${x.recordId}` : searchHref(title, "title");
+      return html`<div class="item">
+        <a class="cover-link" href="${href}" tabindex="-1" aria-hidden="true">${cover(x.title, x.author, { size: "xs", src: x.cover })}</a>
+        <div><div class="title"><a href="${href}">${title}</a></div>
+          <div class="sub">${x.author ? html`<span>${prettyName(x.author)}</span>` : ""}${x.format ? html`<span>${formatName(x.format)}</span>` : ""}</div></div>
+        <div class="end muted small">${fmtDay(x.checkedOut)}</div>
+      </div>`;
+    })}</div>`);
 }
 
 // ---- Hours --------------------------------------------------------------------
@@ -699,9 +952,13 @@ function minutes(t) {
   return h * 60 + Number(m[2] ?? 0);
 }
 
+// "10AM - 3PM" -> "10 AM – 3 PM"
+const fmtTime = (t) => (t ?? "").replace(/(\d)\s*([AP]M)\b/gi, "$1 $2");
+const fmtRange = (r) => fmtTime(r).replace(/\s+-\s+/, " – ");
+
 function openState(b, today) {
   const range = b.hours?.[today.weekday];
-  if (b.note || !range) return { open: false };
+  if (b.note || !range) return { open: false, closedToday: !range };
   const [from, to] = range.split(" - ");
   const [hh, mm] = today.time.split(":").map(Number);
   const now = hh * 60 + mm, start = minutes(from ?? ""), end = minutes(to ?? "");
@@ -710,36 +967,55 @@ function openState(b, today) {
 }
 
 async function hoursPage(params) {
-  render(html`<div class="row spread"><h1>Branches &amp; hours</h1>
-    <input class="input" id="bfilter" type="search" placeholder="Filter branches" style="max-width:260px" value="${params.get("b") ?? ""}"></div>
-    <div id="hours" style="margin-top:20px">${loading(3)}</div>`);
+  render(html`<div class="page-head">
+      <div><h1>Branches &amp; hours</h1><p class="sub" id="today">&nbsp;</p></div>
+      <input class="input" id="bfilter" type="search" placeholder="Find a branch" aria-label="Find a branch" value="${params.get("b") ?? ""}">
+    </div>
+    <div id="hours" style="margin-top:24px">${skeleton(6, 52)}</div>`);
   let h;
   try {
     h = await api("/hours");
   } catch (e) {
-    $("#hours").innerHTML = String(errorBox(e));
+    fill($("#hours"), errorBox(e));
     return;
   }
+  // Open now, then opening later today, then the rest; alphabetical within each.
+  const rank = (st) => (st.open ? 0 : st.opensAt ? 1 : 2);
+  const branches = h.branches.map((b) => ({ b, st: openState(b, h.today) }))
+    .sort((x, y) => rank(x.st) - rank(y.st) || x.b.name.localeCompare(y.b.name));
+  const openCount = branches.filter((x) => x.st.open).length;
+  $("#today").textContent = `${capitalize(h.today.weekday)} · ${openCount ? `${plural(openCount, "branch")} open now` : "All branches closed now"}`;
   const draw = () => {
     const f = $("#bfilter").value.trim().toLowerCase();
-    const list = h.branches.filter((b) => !f || b.name.toLowerCase().includes(f));
-    $("#hours").innerHTML = String(html`
-      <div class="grid branches">${list.map((b) => {
-        const st = openState(b, h.today);
-        const pill = b.note ? html`<span class="pill bad">${b.note}</span>`
-          : st.open ? html`<span class="pill ok"><span class="dot"></span>Open until ${st.until}</span>`
-          : html`<span class="pill">${st.opensAt ? `Opens ${st.opensAt}` : "Closed now"}</span>`;
-        return html`<article class="card branch">
-          <div class="row spread" style="align-items:flex-start"><h3>${b.url ? html`<a href="${b.url}" target="_blank" rel="noopener" style="color:inherit">${b.name}</a>` : b.name}</h3>${pill}</div>
-          <div class="week">${WEEK.map((d) => html`<span class="d ${d === h.today.weekday ? "today" : ""}">${d.slice(0, 3)}</span><span class="${d === h.today.weekday ? "today" : "muted"}">${b.hours[d] ?? "Closed"}</span>`)}</div>
-          <div class="muted small" style="display:grid;gap:4px">
-            ${b.address ? html`<span class="row" style="gap:6px;flex-wrap:nowrap">${raw(icon.pin)}${b.address}</span>` : ""}
-            ${b.phone ? html`<a class="row" style="gap:6px" href="tel:${b.phone.replace(/[^\d+]/g, "")}">${raw(icon.phone)}${b.phone}</a>` : ""}
+    const list = branches.filter(({ b }) => !f || b.name.toLowerCase().includes(f));
+    fill($("#hours"), html`
+      ${list.length ? html`<div class="panel rows">${list.map(({ b, st }) => {
+        const tag = b.note ? html`<span class="tag bad">${b.note}</span>`
+          : st.open ? html`<span class="tag ok"><span class="dot"></span>Open until ${fmtTime(st.until)}</span>`
+          : st.opensAt ? html`<span class="tag warn">Opens ${fmtTime(st.opensAt)}</span>`
+          : html`<span class="tag">${st.closedToday ? "Closed today" : "Closed now"}</span>`;
+        const todays = b.hours?.[h.today.weekday];
+        return html`<details class="branch" ${raw(list.length === 1 ? "open" : "")}>
+          <summary>
+            <span class="name">${shortBranch(b.name)}</span>
+            <span class="today-hours">${!b.note && todays ? `Today ${fmtRange(todays)}` : ""}</span>
+            ${tag}
+            ${raw(icon.chev)}
+          </summary>
+          <div class="detail">
+            <div class="week">${WEEK.map((d) => {
+              const cls = [d === h.today.weekday && "today", !b.hours[d] && "closed"].filter(Boolean).join(" ");
+              return html`<span class="d ${cls}">${d.slice(0, 3)}</span><span class="${cls}">${b.hours[d] ? fmtRange(b.hours[d]) : "Closed"}</span>`;
+            })}</div>
+            <div class="contact">
+              ${b.address ? html`<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(b.address)}" target="_blank" rel="noopener">${raw(icon.pin)}<span>${b.address}</span></a>` : ""}
+              ${b.phone ? html`<a href="tel:${b.phone.replace(/[^\d+]/g, "")}">${raw(icon.phone)}<span>${b.phone}</span></a>` : ""}
+              ${b.url ? html`<a href="${b.url}" target="_blank" rel="noopener">${raw(icon.link)}<span>Branch page</span></a>` : ""}
+            </div>
           </div>
-        </article>`;
-      })}</div>
-      ${list.length ? "" : html`<div class="empty">No branch matches “${f}”.</div>`}
-      <p class="muted small" style="margin-top:20px">From <a href="${h.source}" target="_blank" rel="noopener">the library website</a>. Holiday closures aren't listed.</p>`);
+        </details>`;
+      })}</div>` : html`<div class="panel empty">No branch matches “${f}”.</div>`}
+      <p class="muted small" style="margin-top:16px">From <a href="${h.source}" target="_blank" rel="noopener">the library website</a>. Holiday closures aren't listed.</p>`);
   };
   $("#bfilter").addEventListener("input", draw);
   draw();
@@ -749,6 +1025,7 @@ async function hoursPage(params) {
 
 function updateBadge(s) {
   const b = $("#nav-badge");
+  if (!b) return;
   const n = (s.overdue ?? 0) + (s.holdsReadyForPickup ?? 0);
   b.hidden = !n;
   b.textContent = n;
@@ -765,14 +1042,23 @@ async function route() {
   const params = new URLSearchParams(query);
   const parts = path.split("/").filter(Boolean);
   const section = parts[0] ?? "";
-  document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === section || (section === "record" && a.dataset.nav === "search")));
+  if (section === "account" && MOVED[parts[1]]) {
+    history.replaceState(null, "", `${MOVED[parts[1]]}${query ? `?${query}` : ""}`);
+    return route();
+  }
+  $$("[data-nav]").forEach((a) => {
+    const on = a.dataset.nav === section || (section === "record" && a.dataset.nav === "search");
+    a.classList.toggle("active", on);
+    if (on) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  });
   $("#topsearch").hidden = section === "" || section === "search";
-  const titles = { search: params.get("q") ? `${params.get("q")} – Search` : "Search", account: "My account", hours: "Hours", record: "Record" };
+  const titles = { search: params.get("q") ? `${params.get("q")} – Search` : "Search", borrowed: "Borrowed", lists: "Lists", account: "Account", hours: "Hours", record: "Title" };
   document.title = titles[section] ? `${titles[section]} · Library Helper` : "Library Helper";
 
   if (section === "search") await searchPage(params);
   else if (section === "record" && parts[1]) await recordPage(parts[1]);
-  else if (section === "account") await accountPage(parts[1]);
+  else if (PAGES[section]) await patronPage(section, parts[1]);
   else if (section === "hours") await hoursPage(params);
   else await homePage();
 }
@@ -780,7 +1066,7 @@ async function route() {
 $("#topsearch").addEventListener("submit", (e) => {
   e.preventDefault();
   const q = e.target.q.value.trim();
-  if (q) { location.hash = searchHref(q); e.target.q.value = ""; }
+  if (q) { location.hash = searchHref(q); e.target.q.value = ""; e.target.q.blur(); }
 });
 let lastPath = "";
 window.addEventListener("hashchange", () => {
@@ -793,6 +1079,12 @@ window.addEventListener("hashchange", () => {
 document.addEventListener("click", (e) => {
   const a = e.target.closest?.("[data-back]");
   if (a && history.length > 1) { e.preventDefault(); history.back(); }
+});
+// "/" jumps to the search box from anywhere.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? "")) return;
+  const input = [$("#bigsearch input[name=q]"), $("#searchform input[name=q]"), $("#topsearch input")].find((x) => x?.offsetParent);
+  if (input) { e.preventDefault(); input.focus(); }
 });
 lastPath = location.hash.split("?")[0];
 route();

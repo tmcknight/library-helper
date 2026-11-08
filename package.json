@@ -1,6 +1,6 @@
 {
   "name": "library-helper",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "MCP server for the Lambton County Library (Vega Discover / Sierra) catalogue and patron account",
   "license": "MIT",
   "type": "module",
