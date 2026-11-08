@@ -185,6 +185,18 @@ input, select { font: inherit; color: var(--text); }
 .hits { display: grid; gap: 12px; margin-top: 20px; }
 .hit { display: grid; grid-template-columns: 72px 1fr; gap: 18px; padding: 16px; }
 .hit h3 { font-size: 1.05rem; }
+.hit.has-actions { grid-template-columns: 72px 1fr auto; }
+.hit-actions { display: flex; align-items: flex-start; gap: 8px; }
+@media (max-width: 480px) {
+  .hit.has-actions { grid-template-columns: 72px 1fr; }
+  .hit-actions { grid-column: 2; }
+  .hit-actions .btn.ghost { margin-left: -10px; }
+}
+.list-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.list-picker a { padding: 6px 12px; border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 0.88rem; font-weight: 550; }
+.list-picker a:hover { text-decoration: none; background: var(--accent-soft); }
+.list-picker a.active { background: var(--accent); color: var(--surface); }
+.list-picker a.active .muted { color: inherit; opacity: 0.8; }
 .hit h3 a { color: var(--text); }
 .formats { display: grid; gap: 6px; margin-top: 10px; }
 .format-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.88rem; }

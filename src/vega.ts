@@ -56,6 +56,9 @@ const UA = "Mozilla/5.0 (library-helper MCP)";
 
 type Json = Record<string, any>;
 
+export const LIST_SORTS = ["date.desc", "date.asc", "title.asc", "title.desc"] as const;
+export type ListSort = (typeof LIST_SORTS)[number];
+
 export class VegaClient {
   private readonly cfg: VegaConfig;
   private tokens: Tokens | null = null;
@@ -369,6 +372,70 @@ export class VegaClient {
       query: { sortBy: "checkoutDate.desc", pageNum: 0, pageSize: limit },
     });
     return { enabled: true, total: raw.items.totalResults, items: raw.items.data.map(map.historyItem) };
+  }
+
+  // ---- Reading lists ---------------------------------------------------------
+
+  private static readonly LISTS = "api/search-result/personalization/lists";
+
+  async lists() {
+    // listsPrefetch is how many items to inline per list; 0 is refused, and 1 still gives the count.
+    const raw = await this.api<map.RawList[]>(VegaClient.LISTS, { auth: true, version: "2", query: { listsPrefetch: 1 } });
+    return raw.map(map.list);
+  }
+
+  async listItems(listId: string, opts: { sort?: ListSort; page?: number; limit?: number } = {}) {
+    const raw = await this.api<{ totalResults: number; totalPages: number; page: number; data: map.RawListItem[] }>(
+      `${VegaClient.LISTS}/${encodeURIComponent(listId)}/items`,
+      {
+        auth: true,
+        version: "2",
+        query: { sortBy: opts.sort ?? "date.desc", pageNum: (opts.page ?? 1) - 1, pageSize: opts.limit ?? 50, filterHiddenShowcaseItems: "false" },
+      },
+    );
+    return map.listItems(raw);
+  }
+
+  // Which of the patron's lists hold a work. The API has no direct lookup, so this reads
+  // each list (they're small: one request per list for up to 200 items).
+  async listsContaining(formatGroupId: string) {
+    const lists = await this.lists();
+    const containing: string[] = [];
+    for (const l of lists) {
+      if (!l.count) continue;
+      for (let page = 1; ; page++) {
+        const r = await this.listItems(l.listId, { page, limit: 200 });
+        if (r.items.some((i) => i.id === formatGroupId)) {
+          containing.push(l.listId);
+          break;
+        }
+        if (page >= r.totalPages) break;
+      }
+    }
+    return { lists, containing };
+  }
+
+  // Add a work to some lists and/or remove it from others in one call, as the portal does.
+  // Give either the format group id (with the saved edition's recordId) or just a recordId.
+  async updateListItem(item: { formatGroupId?: string; recordId?: string; title?: string }, add: string[], remove: string[]) {
+    let { formatGroupId, title } = item;
+    if (!formatGroupId) {
+      if (!item.recordId) throw new VegaError("BadRequest", "give a recordId or formatGroupId");
+      const { group } = await this.resolve(item.recordId);
+      formatGroupId = group.id;
+      title ??= group.title;
+    }
+    const r = await this.api<{ addedTo?: string[]; deletedFrom?: string[]; notFound?: unknown[] }>(`${VegaClient.LISTS}/items`, {
+      method: "PATCH",
+      auth: true,
+      version: "2",
+      body: {
+        addTo: add,
+        deleteFrom: remove,
+        items: [{ id: formatGroupId, entityType: "FormatGroup", title: title ?? "", recordId: item.recordId }],
+      },
+    });
+    return { formatGroupId, addedTo: r?.addedTo ?? [], removedFrom: r?.deletedFrom ?? [], ...(r?.notFound?.length && { notFound: r.notFound }) };
   }
 }
 

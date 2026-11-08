@@ -28,6 +28,10 @@ function fakeClient(over: Partial<LibraryClient> = {}) {
     cancelHolds: rec("cancelHolds", [{ cancelled: true }]),
     fines: rec("fines", { totalOutstanding: 0, fines: [] }),
     loanHistory: rec("loanHistory", { enabled: false }),
+    lists: rec("lists", []),
+    listItems: rec("listItems", { total: 0, page: 1, totalPages: 0, items: [] }),
+    listsContaining: rec("listsContaining", { lists: [], containing: [] }),
+    updateListItem: rec("updateListItem", { addedTo: [], removedFrom: [] }),
     ...over,
   } as unknown as LibraryClient;
   return { client, calls };
@@ -137,4 +141,40 @@ test("http: serves the app shell with a CSP", async () => {
     assert.match(await res.text(), /<script type="module" src="app.js">/);
     assert.equal((await fetch(`${base}/app.js`)).headers.get("content-type"), "text/javascript; charset=utf-8");
   });
+});
+
+const L1 = "5196b1b2-5b7c-4570-b8b6-bc45a0bb6f9f";
+const FG = "a6715cb2-4f17-511a-a2d9-e73c9f2c0807";
+
+test("lists: reads pass validated ids and sort through", async () => {
+  const { client, calls } = fakeClient();
+  await handleApi(client, "GET", u("/api/lists"), undefined);
+  await handleApi(client, "GET", u(`/api/lists/${L1}/items?sort=title.asc&page=2`), undefined);
+  await handleApi(client, "GET", u(`/api/lists/containing?id=${FG}`), undefined);
+  assert.deepEqual(calls, [
+    ["lists", []],
+    ["listItems", [L1, { sort: "title.asc", page: 2, limit: 50 }]],
+    ["listsContaining", [FG]],
+  ]);
+  for (const path of ["/api/lists/not-a-uuid/items", `/api/lists/${L1}/items?sort=random`, "/api/lists/containing", "/api/lists/containing?id=1"]) {
+    await assert.rejects(handleApi(client, "GET", u(path), undefined), (e) => e instanceof HttpError && e.status === 400, path);
+  }
+});
+
+test("lists: add/remove validates the body", async () => {
+  const { client, calls } = fakeClient();
+  await handleApi(client, "POST", u("/api/lists/items"), { formatGroupId: FG, recordId: "33990", title: "Seven fallen feathers", add: [L1] });
+  assert.deepEqual(calls, [["updateListItem", [{ formatGroupId: FG, recordId: "33990", title: "Seven fallen feathers" }, [L1], []]]]);
+  const bad = [
+    { formatGroupId: FG },
+    { formatGroupId: FG, add: [] },
+    { formatGroupId: "x", add: [L1] },
+    { formatGroupId: FG, add: ["x"] },
+    { formatGroupId: FG, add: L1 },
+    { formatGroupId: FG, remove: [L1], recordId: "b123" },
+    { formatGroupId: FG, remove: [L1], title: 5 },
+  ];
+  for (const body of bad) {
+    await assert.rejects(handleApi(client, "POST", u("/api/lists/items"), body), (e) => e instanceof HttpError && e.status === 400, JSON.stringify(body));
+  }
 });

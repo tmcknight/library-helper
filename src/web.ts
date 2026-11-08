@@ -4,8 +4,8 @@
 
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { VegaError, SEARCH_TYPES } from "./vega.ts";
-import type { SearchIndex, SearchSort, VegaClient } from "./vega.ts";
+import { VegaError, SEARCH_TYPES, LIST_SORTS } from "./vega.ts";
+import type { ListSort, SearchIndex, SearchSort, VegaClient } from "./vega.ts";
 import { fetchBranchHours, libraryToday } from "./hours.ts";
 import { BRANCHES, HOURS_URL, PICKUP_LOCATIONS } from "./lambton.ts";
 
@@ -23,6 +23,10 @@ export type LibraryClient = Pick<
   | "cancelHolds"
   | "fines"
   | "loanHistory"
+  | "lists"
+  | "listItems"
+  | "listsContaining"
+  | "updateListItem"
 >;
 
 export class HttpError extends Error {
@@ -47,6 +51,13 @@ function intParam(v: string | null, def: number, min: number, max: number): numb
   if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `expected an integer from ${min} to ${max}, got "${v}"`);
   return n;
 }
+
+// Vega's list and format group ids are UUIDs.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuidOf = (s: unknown, what: string) => {
+  if (typeof s !== "string" || !UUID.test(s)) throw new HttpError(400, `${what} must be a UUID`);
+  return s;
+};
 
 function idList(body: unknown, key: string): string[] {
   const ids = (body as Record<string, unknown> | undefined)?.[key];
@@ -93,6 +104,34 @@ export async function handleApi(client: LibraryClient, method: string, url: URL,
   if (route === "POST /holds/cancel") return client.cancelHolds(idList(body, "holdIds"));
   if (route === "GET /fines") return client.fines();
   if (route === "GET /history") return client.loanHistory(intParam(q.get("limit"), 100, 1, 200));
+
+  // Reading lists
+  if (route === "GET /lists") return client.lists();
+  if (route === "GET /lists/containing") return client.listsContaining(uuidOf(q.get("id"), "id"));
+  if (method === "GET" && (m = path.match(/^\/lists\/([^/]+)\/items$/))) {
+    const sort = (q.get("sort") || "date.desc") as ListSort;
+    if (!LIST_SORTS.includes(sort)) throw new HttpError(400, `sort must be one of ${LIST_SORTS.join(", ")}`);
+    return client.listItems(uuidOf(m[1], "list id"), { sort, page: intParam(q.get("page"), 1, 1, 1000), limit: intParam(q.get("limit"), 50, 1, 200) });
+  }
+  if (route === "POST /lists/items") {
+    // {formatGroupId, recordId?, title?, add: [listId], remove: [listId]}
+    const b = (body ?? {}) as Record<string, unknown>;
+    const lists = (key: string) => {
+      const v = b[key] ?? [];
+      if (!Array.isArray(v)) throw new HttpError(400, `${key} must be an array of list ids`);
+      return v.map((x) => uuidOf(x, `${key} entries`));
+    };
+    const add = lists("add");
+    const remove = lists("remove");
+    if (!add.length && !remove.length) throw new HttpError(400, "nothing to add or remove");
+    if (b.recordId != null && !/^\d+$/.test(String(b.recordId))) throw new HttpError(400, "recordId must be a number");
+    if (b.title != null && typeof b.title !== "string") throw new HttpError(400, "title must be a string");
+    return client.updateListItem(
+      { formatGroupId: uuidOf(b.formatGroupId, "formatGroupId"), recordId: b.recordId == null ? undefined : String(b.recordId), title: (b.title as string | undefined)?.slice(0, 500) },
+      add,
+      remove,
+    );
+  }
 
   throw new HttpError(404, `no route ${route}`);
 }

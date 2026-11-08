@@ -140,3 +140,24 @@ test("historyItem: title, author, format and a Sierra record id from the format 
   assert.equal(libby.recordId, undefined);
   assert.equal(libby.format, "eBook");
 });
+
+test("list: names the For Later list and counts items", () => {
+  assert.deepEqual(map.list({ id: "a", type: "FOR_LATER", items: { totalResults: 0 } }), { listId: "a", name: "For Later", type: "for-later", count: 0 });
+  assert.deepEqual(map.list({ id: "b", name: "Personal reading list", type: "REGULAR", items: { totalResults: 8 } }), {
+    listId: "b",
+    name: "Personal reading list",
+    type: "regular",
+    count: 8,
+  });
+});
+
+test("listItems: hits with the saved edition's record id", () => {
+  const fg = fixture("search.json").data[0];
+  const r = map.listItems({ totalResults: 2, totalPages: 1, page: 0, data: [{ ...fg, personalLists: [{ recordId: "33990", listIds: ["b"] }] }, fg] });
+  assert.equal(r.page, 1);
+  assert.equal(r.items[0].id, fg.id);
+  assert.equal(r.items[0].title, "Watership Down");
+  assert.equal(r.items[0].recordId, "33990");
+  // Without personalLists, fall back to the first Sierra edition.
+  assert.match(r.items[1].recordId!, /^\d+$/);
+});

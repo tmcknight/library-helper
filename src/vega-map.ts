@@ -98,15 +98,21 @@ export function searchResult(raw: { totalResults: number; totalPages: number; pa
     total: raw.totalResults,
     page: raw.page + 1,
     totalPages: raw.totalPages,
-    hits: raw.data.map((fg) => ({
-      title: fg.title,
-      author: fg.primaryAgent?.label,
-      year: fg.publicationDate,
-      language: fg.language,
-      // For a cover image: a physical format's ISBN first, since e-book ISBNs rarely have one.
-      isbn: (fg.materialTabs ?? []).find((t) => t.type === "physical" && t.identifiers?.isbn)?.identifiers?.isbn ?? fg.identifiers?.isbn,
-      formats: (fg.materialTabs ?? []).map(format),
-    })),
+    hits: raw.data.map(hit),
+  };
+}
+
+// One work. id is the format group id, which reading lists are keyed by.
+export function hit(fg: RawFormatGroup) {
+  return {
+    id: fg.id,
+    title: fg.title,
+    author: fg.primaryAgent?.label,
+    year: fg.publicationDate,
+    language: fg.language,
+    // For a cover image: a physical format's ISBN first, since e-book ISBNs rarely have one.
+    isbn: (fg.materialTabs ?? []).find((t) => t.type === "physical" && t.identifiers?.isbn)?.identifiers?.isbn ?? fg.identifiers?.isbn,
+    formats: (fg.materialTabs ?? []).map(format),
   };
 }
 
@@ -146,6 +152,7 @@ export function record(fg: RawFormatGroup, inst: RawInstance, recordId: string) 
     .filter((e) => e.recordId !== recordId);
   return {
     recordId,
+    formatGroupId: fg.id,
     title: inst.title?.[0]?.label ?? fg.title,
     contributors: (inst.agent ?? []).map((a) => ({ name: a.item.label, role: a.linkType?.attributes?.role })),
     format: ed?.tab.name,
@@ -273,6 +280,43 @@ export function historyItem(h: RawHistoryItem) {
     format: typeof h.format === "string" && h.format ? h.format : tab?.name,
     checkedOut: h.checkoutDate,
     ...(recordId && { recordId }),
+  };
+}
+
+// ---- Reading lists ---------------------------------------------------------
+
+// From api/search-result/personalization/lists. Every patron has one FOR_LATER list (no
+// name; the portal calls it "For Later") and any number of REGULAR ones.
+export interface RawList {
+  id: string;
+  name?: string;
+  type: string;
+  items?: { totalResults?: number };
+}
+
+export function list(l: RawList) {
+  const forLater = l.type === "FOR_LATER";
+  return {
+    listId: l.id,
+    name: forLater ? "For Later" : (l.name ?? "Untitled list"),
+    type: forLater ? "for-later" : "regular",
+    count: l.items?.totalResults ?? 0,
+  };
+}
+
+// List entries are format groups; personalLists says which edition was saved.
+export type RawListItem = RawFormatGroup & { personalLists?: { recordId?: string; listIds?: string[] }[] };
+
+export function listItems(raw: { totalResults: number; totalPages: number; page: number; data: RawListItem[] }) {
+  return {
+    total: raw.totalResults,
+    page: raw.page + 1,
+    totalPages: raw.totalPages,
+    items: raw.data.map((fg) => {
+      const saved = fg.personalLists?.find((p) => p.recordId && /^\d+$/.test(p.recordId))?.recordId;
+      const first = (fg.materialTabs ?? []).flatMap((t) => t.editions ?? []).find((e) => /^\d+$/.test(e.recordId))?.recordId;
+      return { ...hit(fg), recordId: saved ?? first };
+    }),
   };
 }
 

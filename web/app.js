@@ -73,6 +73,7 @@ const cleanTitle = (t) => (t ?? "").replace(/\s*[/:]\s*$/, "").replace(/\s+:\s+/
 const icon = {
   search: '<svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
   back: '<svg class="i" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>',
+  bookmark: '<svg class="i" viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4-6 4z"/></svg>',
   refresh: '<svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
   pin: '<svg class="i" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
   phone: '<svg class="i" viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>',
@@ -246,7 +247,10 @@ async function searchPage(params) {
   if (!q) return;
 
   try {
-    const r = await api(`/search?${new URLSearchParams({ q, index, sort, page, limit: 20 })}`);
+    const [r, cfg] = await Promise.all([
+      api(`/search?${new URLSearchParams({ q, index, sort, page, limit: 20 })}`),
+      getConfig().catch(() => ({})),
+    ]);
     if (!r.hits.length) {
       $("#results").innerHTML = String(html`<div class="empty"><h2>No results</h2><p>Try fewer words, or search everything instead of one field.</p></div>`);
       return;
@@ -254,7 +258,7 @@ async function searchPage(params) {
     const pageHref = (p) => searchHref(q, index, { ...(sort !== "relevance" && { sort }), page: p });
     $("#results").innerHTML = String(html`
       <p class="muted small" style="margin-top:16px">${r.total.toLocaleString()} results${r.totalPages > 1 ? ` · page ${r.page} of ${r.totalPages}` : ""}</p>
-      <div class="hits">${r.hits.map(hitCard)}</div>
+      <div class="hits">${r.hits.map((h) => hitCard(h, { save: cfg.hasCredentials }))}</div>
       ${r.totalPages > 1 ? html`<nav class="pager">
         ${r.page > 1 ? html`<a class="btn" href="${pageHref(r.page - 1)}">← Previous</a>` : ""}
         <span class="muted small">Page ${r.page} of ${r.totalPages}</span>
@@ -274,10 +278,15 @@ function availabilityPill(status, electronic) {
   return html`<span class="pill ${tone}"><span class="dot"></span>${label}</span>`;
 }
 
-function hitCard(hit) {
-  const first = hit.formats.flatMap((f) => f.editions)[0];
-  const href = first ? `#/record/${first.recordId}` : null;
-  return html`<article class="card hit">
+// opts.save: show a "Save" button (needs a card); opts.removeFrom: a list id to show "Remove" for.
+function hitCard(hit, opts = {}) {
+  const first = hit.recordId ?? hit.formats.flatMap((f) => f.editions)[0]?.recordId;
+  const href = first ? `#/record/${first}` : null;
+  const item = { formatGroupId: hit.id, recordId: first, title: cleanTitle(hit.title) };
+  const actions = opts.removeFrom
+    ? html`<button class="btn sm" data-list-remove="${opts.removeFrom}" data-item="${JSON.stringify(item)}">Remove</button>`
+    : opts.save && hit.id ? html`<button class="btn sm ghost" data-save="${JSON.stringify(item)}" aria-label="Save ${item.title} to a list">${raw(icon.bookmark)} Save</button>` : "";
+  return html`<article class="card hit${actions ? " has-actions" : ""}">
     ${href ? html`<a href="${href}" aria-hidden="true" tabindex="-1">${cover(hit.title, hit.author, { isbn: hit.isbn })}</a>` : cover(hit.title, hit.author, { isbn: hit.isbn })}
     <div>
       <h3>${href ? html`<a href="${href}">${cleanTitle(hit.title)}</a>` : cleanTitle(hit.title)}</h3>
@@ -293,6 +302,7 @@ function hitCard(hit) {
         </div>`;
       })}</div>
     </div>
+    ${actions ? html`<div class="hit-actions">${actions}</div>` : ""}
   </article>`;
 }
 
@@ -327,7 +337,8 @@ async function recordPage(id) {
         </div>
         <div class="row">
           ${availabilityPill(rec.status)}
-          ${cfg.hasCredentials ? html`<button class="btn primary" id="hold-btn">Place hold</button>` : ""}
+          ${cfg.hasCredentials ? html`<button class="btn primary" id="hold-btn">Place hold</button>
+            <button class="btn" data-save="${JSON.stringify({ formatGroupId: rec.formatGroupId, recordId: rec.recordId, title: cleanTitle(rec.title) })}">${raw(icon.bookmark)} Save to list</button>` : ""}
         </div>
         ${rec.summary ? html`<p class="summary">${rec.summary}</p>` : ""}
         <dl class="meta">${meta.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>
@@ -397,7 +408,7 @@ async function holdDialog(rec) {
 
 // ---- Account ------------------------------------------------------------------
 
-const TABS = [["loans", "Checked out"], ["holds", "Holds"], ["fines", "Fines"], ["history", "History"]];
+const TABS = [["loans", "Checked out"], ["holds", "Holds"], ["lists", "Lists"], ["fines", "Fines"], ["history", "History"]];
 
 async function accountPage(tab = "loans") {
   const cfg = await getConfig().catch((e) => ({ error: e }));
@@ -417,7 +428,7 @@ async function accountPage(tab = "loans") {
     updateBadge(s);
   }).catch((e) => { $("#summary").innerHTML = String(errorBox(e)); });
 
-  const view = { loans: loansTab, holds: holdsTab, fines: finesTab, history: historyTab }[tab] ?? loansTab;
+  const view = { loans: loansTab, holds: holdsTab, lists: listsTab, fines: finesTab, history: historyTab }[tab] ?? loansTab;
   try {
     await view($("#tab"));
   } catch (e) {
@@ -531,6 +542,113 @@ function confirmDialog(title, body, action) {
   dlg.showModal();
   return new Promise((resolve) => dlg.addEventListener("close", () => resolve(dlg.returnValue === "yes"), { once: true }));
 }
+
+// ---- Reading lists ------------------------------------------------------------------
+
+const LIST_SORTS = [["date.desc", "Newest first"], ["date.asc", "Oldest first"], ["title.asc", "Title A–Z"], ["title.desc", "Title Z–A"]];
+
+async function listsTab(el) {
+  const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
+  const lists = await api("/lists");
+  setCount("lists", lists.reduce((n, l) => n + l.count, 0));
+  if (!lists.length) {
+    el.innerHTML = String(html`<div class="card empty"><h2>No lists</h2></div>`);
+    return;
+  }
+  // Default to the first list with something on it, preferring the patron's own lists.
+  const current = lists.find((l) => l.listId === params.get("list")) ?? lists.find((l) => l.count && l.type === "regular") ?? lists.find((l) => l.count) ?? lists[0];
+  const sort = LIST_SORTS.some(([k]) => k === params.get("sort")) ? params.get("sort") : "date.desc";
+  const page = Number(params.get("page")) || 1;
+  const href = (o) => `#/account/lists?${new URLSearchParams({ list: current.listId, sort, ...o })}`;
+  el.innerHTML = String(html`
+    <div class="row spread" style="margin-bottom:12px">
+      <div class="list-picker" role="tablist">${lists.map((l) => html`<a role="tab" aria-selected="${String(l === current)}" class="${l === current ? "active" : ""}" href="#/account/lists?${new URLSearchParams({ list: l.listId, sort })}">${l.name} <span class="muted">${l.count}</span></a>`)}</div>
+      <select class="select" id="list-sort" aria-label="Sort list">${options(LIST_SORTS, sort)}</select>
+    </div>
+    <div id="list-items">${loading(2)}</div>`);
+  $("#list-sort", el).addEventListener("change", (e) => { location.hash = href({ sort: e.target.value }); });
+  if (!current.count) {
+    $("#list-items", el).innerHTML = String(html`<div class="card empty"><h2>Nothing saved here yet</h2><p>Use <strong>Save</strong> on a search result or record to add titles.</p></div>`);
+    return;
+  }
+  const r = await api(`/lists/${current.listId}/items?${new URLSearchParams({ sort, page, limit: 50 })}`);
+  $("#list-items", el).innerHTML = String(html`
+    <div class="hits">${r.items.map((h) => hitCard(h, { removeFrom: current.listId }))}</div>
+    ${r.totalPages > 1 ? html`<nav class="pager">
+      ${r.page > 1 ? html`<a class="btn" href="${href({ page: r.page - 1 })}">← Previous</a>` : ""}
+      <span class="muted small">Page ${r.page} of ${r.totalPages}</span>
+      ${r.page < r.totalPages ? html`<a class="btn" href="${href({ page: r.page + 1 })}">Next →</a>` : ""}
+    </nav>` : ""}`);
+}
+
+async function updateList(item, add, remove) {
+  return api("/lists/items", { method: "POST", body: { ...item, add, remove } });
+}
+
+// Pick which lists a title is on. Ticks start from where it is now; saving sends the difference.
+async function saveDialog(item) {
+  const dlg = $("#dialog");
+  dlg.innerHTML = String(html`<form method="dialog">
+    <div><h2>Save to list</h2><p class="muted small" style="margin-top:6px">${item.title}</p></div>
+    <div id="list-choices">${loading(1)}</div>
+    <div class="actions"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="ok" disabled>Save</button></div>
+  </form>`);
+  dlg.showModal();
+  let state;
+  try {
+    state = await api(`/lists/containing?${new URLSearchParams({ id: item.formatGroupId })}`);
+  } catch (e) {
+    $("#list-choices", dlg).innerHTML = String(errorBox(e));
+    return;
+  }
+  const on = new Set(state.containing);
+  $("#list-choices", dlg).innerHTML = String(html`<div class="stack" style="gap:10px">${state.lists.map((l) => html`
+    <label class="row" style="gap:10px"><input type="checkbox" class="check" name="list" value="${l.listId}" ${raw(on.has(l.listId) ? "checked" : "")}> ${l.name} <span class="muted small">${l.count}</span></label>`)}</div>`);
+  // Nothing ticked yet: pre-tick the first own list so one click saves.
+  if (!on.size) {
+    const def = state.lists.find((l) => l.type === "regular") ?? state.lists[0];
+    const box = def && $(`input[value="${def.listId}"]`, dlg);
+    if (box) box.checked = true;
+  }
+  $('button[value="ok"]', dlg).disabled = false;
+  dlg.addEventListener("close", async () => {
+    if (dlg.returnValue !== "ok") return;
+    const ticked = new Set([...dlg.querySelectorAll('input[name="list"]:checked')].map((b) => b.value));
+    const add = [...ticked].filter((id) => !on.has(id));
+    const remove = [...on].filter((id) => !ticked.has(id));
+    if (!add.length && !remove.length) return;
+    const names = (ids) => ids.map((id) => state.lists.find((l) => l.listId === id)?.name).join(", ");
+    try {
+      await updateList(item, add, remove);
+      toast([add.length && `Saved to ${names(add)}.`, remove.length && `Removed from ${names(remove)}.`].filter(Boolean).join(" "));
+    } catch (e) {
+      toast(e.message, "bad");
+    }
+  }, { once: true });
+}
+
+document.addEventListener("click", async (e) => {
+  const save = e.target.closest?.("[data-save]");
+  if (save) {
+    e.preventDefault();
+    saveDialog(JSON.parse(save.dataset.save));
+    return;
+  }
+  const rm = e.target.closest?.("[data-list-remove]");
+  if (rm) {
+    e.preventDefault();
+    const item = JSON.parse(rm.dataset.item);
+    rm.disabled = true;
+    try {
+      await updateList(item, [], [rm.dataset.listRemove]);
+      toast(`Removed ${item.title}.`);
+      route();
+    } catch (err) {
+      toast(err.message, "bad");
+      rm.disabled = false;
+    }
+  }
+});
 
 async function finesTab(el) {
   const f = await api("/fines");
